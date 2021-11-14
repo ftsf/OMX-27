@@ -117,6 +117,13 @@ bool clearedFlag = false;
 bool enc_edit = false;
 bool midiAUX = false;
 
+bool arp = false;
+bool arpLatch = false;
+int arpTimer = 0;
+int arpOctaves = 2;
+int arpOctaveIndex = 0;
+float arpGate = 1.0f;
+
 int defaultVelocity = 100;
 int octave = 0;			// default C4 is 0 - range is -4 to +5
 int newoctave = octave;
@@ -143,6 +150,9 @@ const int maxswing = 100;
 bool keyState[27] = {false};
 int midiKeyState[27] =     {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
 int midiChannelState[27] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+int arpNotes[27] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+int arpLastNote = -1;
+uint8_t arpIndex = 0;
 int rrChannel = 0;
 bool midiRoundRobin = false;
 int midiRRChannelCount = 1;
@@ -412,7 +422,7 @@ int getDefaultColor(int pixel) {
 		return LEDOFF;
 	} else {
 		if(midiAUX) {
-			if(pixel == 1 || pixel == 2 || pixel == 11 || pixel == 12) {
+			if(pixel == 1 || pixel == 2 || pixel == 3 || pixel == 4 || pixel == 11 || pixel == 12) {
 				return LEDOFF;
 			}
 		}
@@ -435,14 +445,18 @@ void midi_leds() {
 		// Blink left/right keys for octave select indicators.
 		auto color1 = blinkState ? LIME : getDefaultColor(1);
 		auto color2 = blinkState ? MAGENTA : getDefaultColor(2);
-		auto color3 = blinkState ? ORANGE : getDefaultColor(3);
-		auto color4 = blinkState ? RBLUE : getDefaultColor(4);
+		auto color3 = blinkState ? CYAN : getDefaultColor(3);
+		auto color4 = blinkState ? INDIGO : getDefaultColor(4);
+		auto color11 = blinkState ? ORANGE : getDefaultColor(11);
+		auto color12 = blinkState ? RBLUE : getDefaultColor(12);
 
 		strip.setPixelColor(0, RED);
 		strip.setPixelColor(1, color1);
 		strip.setPixelColor(2, color2);
-		strip.setPixelColor(11, color3);
-		strip.setPixelColor(12, color4);
+		strip.setPixelColor(3, color3);
+		strip.setPixelColor(4, color4);
+		strip.setPixelColor(11, color11);
+		strip.setPixelColor(12, color12);
 
 	} else {
 		strip.setPixelColor(0, LEDOFF);
@@ -763,13 +777,13 @@ void dispGenericMode(int submode, int selected){
 			break;
 		case SUBMODE_MIDI3:			
 			legends[0] = "PBNK";
-			legends[1] = "---";
-			legends[2] = "---";
-			legends[3] = "---";
+			legends[1] = "A.SPD";
+			legends[2] = "A.OCT";
+			legends[3] = "A.GAT";
 			legendVals[0] = potbank + 1;
-			legendVals[1] = 0;
-			legendVals[2] = 0;
-			legendVals[3] = 0;
+			legendVals[1] = clockbpm;
+			legendVals[2] = arpOctaves;
+			legendVals[3] = (int)(arpGate * 100.0f);
 			dispPage = 3;
 			break;
 		case SUBMODE_SEQ:
@@ -1040,6 +1054,10 @@ void loop() {
 	}
 	doStep();
 
+	if(arp) {
+		doArpStep(passed);
+	}
+
 	// DISPLAY SETUP
 	display.clearDisplay();
 
@@ -1143,8 +1161,22 @@ void loop() {
 					// PAGE THREE
 					if (miparam == 11) { 
 						potbank = constrain(potbank + amt, 0, NUM_CC_BANKS-1);
+					} else if (miparam == 12) {
+						// set tempo (for arps)
+						newtempo = constrain(clockbpm + amt, 40, 300);
+						if (newtempo != clockbpm){
+							// SET TEMPO HERE
+							clockbpm = newtempo;
+							resetClocks();
+						}
+					} else if (miparam == 13) {
+						// arp octaves
+						arpOctaves = constrain(arpOctaves + amt, 1, 4);
+						arpOctaveIndex = constrain(arpOctaveIndex, 0, arpOctaves - 1);
+					} else if (miparam == 14) {
+						// arp gate
+						arpGate = constrain(arpGate + (float)amt * 0.01f, 0.0f, 1.0f);
 					}
-					
 					dirtyDisplay = true;
 					break;
 				case MODE_S1: // SEQ 1
@@ -1508,6 +1540,30 @@ void loop() {
 								int chng = thisKey == 1 ? -1 : 1;
 								miparam = constrain((miparam + chng ) % 15, 0, 14);
 								mmpage = miparam / NUM_DISP_PARAMS;
+							}
+						} else if (thisKey == 3) {
+							arp = !arp;
+							for(int i = 0; i < 27; i++) {
+								arpNotes[i] = -1;
+								arpIndex = 0;
+								arpTimer = 0;
+							}
+							if(arpLastNote != -1) {
+								rawNoteOff(arpLastNote, rrChannel);
+							}
+						} else if (thisKey == 4) {
+							if(arp) {
+								arpLatch = !arpLatch;
+								if(arpLatch == false) {
+									for(int i = 0; i < 27; i++) {
+										arpNotes[i] = -1;
+										arpIndex = 0;
+										arpTimer = 0;
+									}
+									if(arpLastNote != -1) {
+										rawNoteOff(arpLastNote, rrChannel);
+									}
+								}
 							}
 						} else if(thisKey == 26) {
 							scaleRoot = -1; // disable scales
@@ -2205,6 +2261,41 @@ void step_off(int patternNum, int position){
 //	digitalWrite(CVGATE_PIN, LOW);
 }
 
+void doArpStep(Micros dt) {
+	arpTimer -= dt;
+	if(arpTimer < (float)step_micros * (1.0f - arpGate)) {
+		if(arpLastNote != -1) {
+			rawNoteOff(arpLastNote, rrChannel);
+			arpLastNote = -1;
+		}
+		rrChannel = (rrChannel % midiRRChannelCount) + 1;
+	}
+	if(arpTimer < 0) {
+		arpTimer += step_micros;
+		// next note
+		arpIndex = (arpIndex + 1) % 27;
+		// find next valid note
+		int note = arpNotes[arpIndex];
+		if(note == -1) {
+			for(int i = 0; i < 27; i++) {
+				arpIndex = (arpIndex + 1) % 27;
+				note = arpNotes[arpIndex];
+				if(note != -1) {
+					break;
+				}
+			}
+		}
+		if(note != -1) {
+			if(arpIndex == 0) {
+				arpOctaveIndex = (arpOctaveIndex + 1) % arpOctaves;
+			}
+			note += 12 * arpOctaveIndex;
+			rawNoteOn(note, defaultVelocity, rrChannel);
+			arpLastNote = note;
+		}
+	}
+}
+
 void doStep() {
 // // probability test
 	bool testProb = probResult(stepNoteP[playingPattern][seqPos[playingPattern]].prob);
@@ -2354,8 +2445,8 @@ void OnNoteOff(byte channel, byte note, byte velocity) {
 }
 
 // #### Outbound MIDI Mode note on/off
-void midiNoteOn(int notenum, int velocity, int channel) {
-	int adjnote = notes[notenum] + (octave * 12); // adjust key for octave range
+void midiNoteOn(int keynum, int velocity, int channel) {
+	int adjnote = notes[keynum] + (octave * 12); // adjust key for octave range
 	rrChannel = (rrChannel % midiRRChannelCount) + 1;
 	int adjchan = rrChannel;
 
@@ -2364,38 +2455,102 @@ void midiNoteOn(int notenum, int velocity, int channel) {
 
 		// keep track of adjusted note when pressed so that when key is released we send
 		// the correct note off message
-		midiKeyState[notenum] = adjnote;
 
-		// RoundRobin Setting?
-		if (midiRoundRobin) {
-			adjchan = rrChannel + midiRRChannelOffset;
+		if(!arp) {
+			// RoundRobin Setting?
+			if (midiRoundRobin) {
+				adjchan = rrChannel + midiRRChannelOffset;
+			} else {
+				adjchan = channel;
+			}
+			midiChannelState[keynum] = adjchan;
+			MM::sendNoteOn(adjnote, velocity, adjchan);
+			// CV
+			cvNoteOn(adjnote);
 		} else {
-			adjchan = channel;
+			bool latchTransition = false;
+			if(arpLatch) {
+				// if no keys are down, reset all arp notes and transition to it
+				bool anyKeysDown = false;
+				for(int i = 0; i < 27; i++) {
+					if(midiKeyState[i] != -1) {
+						anyKeysDown = true;
+						break;
+					}
+				}
+				if(anyKeysDown == false) {
+					for(int i = 0; i < 27; i++) {
+						if(arpNotes[i] != -1) {
+							latchTransition = true;
+						}
+						arpNotes[i] = -1;
+					}
+				}
+			}
+			for(int i = 0; i < 27; i++) {
+				if(arpNotes[i] == -1) {
+					arpNotes[i] = adjnote;
+					if(i == 0 && latchTransition == false) {
+						arpIndex = -1;
+						arpTimer = 0;
+					}
+					break;
+				}
+			}
 		}
-		midiChannelState[notenum] = adjchan;
-		MM::sendNoteOn(adjnote, velocity, adjchan);
-		// CV
-		cvNoteOn(adjnote);
+		midiKeyState[keynum] = adjnote;
 	}
 
-	strip.setPixelColor(notenum, MIDINOTEON);         //  Set pixel's color (in RAM)
+	strip.setPixelColor(keynum, MIDINOTEON);         //  Set pixel's color (in RAM)
 	dirtyPixels = true;
 	dirtyDisplay = true;
 }
 
-void midiNoteOff(int notenum, int channel) {
+void midiNoteOff(int keynum, int channel) {
 	// we use the key state captured at the time we pressed the key to send the correct note off message
-	int adjnote = midiKeyState[notenum];
-	int adjchan = midiChannelState[notenum];
-	if (adjnote>=0 && adjnote <128){
-		MM::sendNoteOff(adjnote, 0, adjchan);
-		// CV off
-		cvNoteOff();
+	int adjnote = midiKeyState[keynum];
+	int adjchan = midiChannelState[keynum];
+	midiKeyState[keynum] = -1;
+	midiChannelState[keynum] = -1;
+	if(!arp) {
+		if (adjnote>=0 && adjnote <128){
+			MM::sendNoteOff(adjnote, 0, adjchan);
+			// CV off
+			cvNoteOff();
+		}
+	} else {
+		if(arpLatch == false) {
+			for(int i = 0; i < 27; i++) {
+				if(arpNotes[i] == adjnote) {
+					arpNotes[i] = -1;
+					break;
+				}
+			}
+		}
 	}
 
-	strip.setPixelColor(notenum, getDefaultColor(notenum));
+	strip.setPixelColor(keynum, getDefaultColor(keynum));
 	dirtyPixels = true;
 	dirtyDisplay = true;
+}
+
+void rawNoteOn(int notenum, int velocity, int channel) {
+	MM::sendNoteOn(notenum, velocity, channel);
+	int noteOnKB = notenum - (octave + 5) * 12;
+	if(noteOnKB >= 0 && noteOnKB <= 26) {
+		int key = midiKeyMap[noteOnKB];
+		strip.setPixelColor(key, MIDINOTEON);
+	}
+
+}
+
+void rawNoteOff(int notenum, int channel) {
+	MM::sendNoteOff(notenum, 0, channel);
+	int noteOnKB = notenum - (octave + 5) * 12;
+	if(noteOnKB >= 0 && noteOnKB <= 26) {
+		int key = midiKeyMap[noteOnKB];
+		strip.setPixelColor(key, getDefaultColor(key));
+	}
 }
 
 // #### SEQ Mode note on/off
