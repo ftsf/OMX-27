@@ -323,6 +323,14 @@ const ui_param midi_params[] = {
 		127,
 		uiDrawValuePercent
 	},
+	{
+		"TEST",
+		&arpGate,
+		false,
+		0,
+		127,
+		uiDrawValuePercent
+	},
 };
 
 // ENCODER
@@ -912,7 +920,11 @@ void invertColor(bool flip){
 	}
 }
 
-void dispValBox(ui_param* param, int16_t n, bool selected){			// n is box 0-3
+void dispParamLabel(const ui_param* param, int16_t n){
+	u8g2centerText(param->getLabel != NULL ? param->getLabel() : param->label, (n*32) + 1, hline-2, 32, 10);
+}
+
+void dispValBox(const ui_param* param, int16_t n, bool selected){			// n is box 0-3
 	if(selected) {
 		u8g2_display.setForegroundColor(BLACK);
 		u8g2_display.setBackgroundColor(WHITE);
@@ -930,31 +942,23 @@ void dispSymbBox(const char* v, int16_t n, bool inv){			// n is box 0-3
 }
 
 void dispGenericMode(int submode, int selected){
-	const char* legends[4] = {"","","",""};
-	int legendVals[4] = {0,0,0,0};
 	int dispPage = selected / 4;
-	const char* legendText[4] = {"","","",""};
 	int start = dispPage * 4;
-	int numPages = 0;
+	int numParams = 0;
+	const ui_param* params = NULL;
 	int selectedOnPage = selected % 4;
 
 	switch(submode){
 		case SUBMODE_MIDI:
-			numPages = ARRAYLEN(midi_params) / 4;
-			for(int i = 0, j = start; i < 4; i++, j++) {
-				if(j < (int)ARRAYLEN(midi_params)) {
-					if(midi_params[j].getLabel != NULL) {
-						legends[i] = midi_params[j].getLabel();
-					} else {
-						legends[i] = midi_params[j].label;
-					}
-					legendVals[i] = *midi_params[j].valuePtr;
-				} else {
-					legends[i] = "";
-					legendVals[i] = 0;
-				}
-			}
+			params = midi_params;
+			numParams = ARRAYLEN(midi_params);
 			break;
+		default:
+			params = NULL;
+			numParams = 0;
+			break;
+	}
+
 	/*
 		case SUBMODE_SEQ:
 			legends[0] = "PTN";
@@ -1078,10 +1082,27 @@ void dispGenericMode(int submode, int selected){
 			dispPage = 3;
 			break;
 	*/
-		default:
-			break;
-	}
 
+
+	int numPages = (numParams + 3) / 4; // integer ceiling
+	int numParamsOnPage = MIN(numParams - start, 4);
+
+	/*
+			for(int i = 0, j = start; i < 4; i++, j++) {
+				if(j < (int)ARRAYLEN(midi_params)) {
+					if(midi_params[j].getLabel != NULL) {
+						legends[i] = midi_params[j].getLabel();
+					} else {
+						legends[i] = midi_params[j].label;
+					}
+					legendVals[i] = *midi_params[j].valuePtr;
+				} else {
+					legends[i] = "";
+					legendVals[i] = 0;
+				}
+			}
+			break;
+	*/
 
 	u8g2_display.setFontMode(1);
 	u8g2_display.setFont(FONT_LABELS);
@@ -1092,8 +1113,10 @@ void dispGenericMode(int submode, int selected){
 	u8g2_display.setForegroundColor(BLACK);
 	u8g2_display.setBackgroundColor(WHITE);
 
-	for (int j= 0; j<4; j++){
-		u8g2centerText(legends[j], (j*32) + 1, hline-2, 32, 10);
+	for (int j = 0; j < 4; j++){
+		if(j < numParamsOnPage) {
+			dispParamLabel(&params[start+j], j);
+		}
 	}
 
 	// value text formatting
@@ -1118,21 +1141,12 @@ void dispGenericMode(int submode, int selected){
 		}else{
 			highlight = false;
 		}
-		if (legendVals[j] == -127){
-			dispSymbBox(legendText[j], j, highlight);
-		} else {
-			dispValBox(&midi_params[start+j], j, highlight);
+		if(j < numParamsOnPage) {
+			dispValBox(&params[start+j], j, highlight);
 		}
-	}
-	if(uiEditParam) {
-		// draw a hollow box around the value being edited
 	}
 	for (int k = 0; k < numPages; k++){
-		if (dispPage == k){
-			dispPageIndicators(k, true);
-		} else {
-			dispPageIndicators(k, false);
-		}
+		dispPageIndicators(k, dispPage == k);
 	}
 }
 
