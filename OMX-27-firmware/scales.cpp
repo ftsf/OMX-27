@@ -132,18 +132,18 @@ const char* scaleNames[] = {
 };
 
 const char* noteNames[] = {
-	"C",
+	"C-",
 	"C#",
-	"D",
+	"D-",
 	"D#",
-	"E",
-	"F",
+	"E-",
+	"F-",
 	"F#",
-	"G",
+	"G-",
 	"G#",
-	"A",
+	"A-",
 	"A#",
-	"B",
+	"B-",
 };
 
 

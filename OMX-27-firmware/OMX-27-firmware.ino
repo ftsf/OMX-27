@@ -27,6 +27,20 @@
 #include "scales.h"
 #include "util.h"
 
+typedef struct {
+	const char* label;
+	int* valuePtr;
+	bool readOnly;
+	int min, max;
+	void (*drawValue)(int*,int);
+	void (*onChange)(int*,int);
+	char* (*getLabel)();
+} ui_param;
+
+bool uiEditParam = false;
+
+const auto ARP_SEQ_LEN = 32;
+
 U8G2_FOR_ADAFRUIT_GFX u8g2_display;
 
 const int potCount = 5;
@@ -78,7 +92,9 @@ int nspage = 0;
 int pppage = 0;
 int sqpage = 0;
 int srpage = 0;
-int mmpage = 0;
+
+int pageWrapDelay = 0;
+int pageChangeDelay = 0;
 
 int miparam = 0;	// midi params item counter
 int nsparam = 0;	// note select params
@@ -120,11 +136,15 @@ bool midiAUX = false;
 bool arp = false;
 bool arpLatch = false;
 int arpTimer = 0;
+int arpTime = 0;
+int arpSwing = 0;
+int arpSwingIndex = 0;
 int arpOctaves = 2;
 int arpOctaveIndex = 0;
-float arpGate = 1.0f;
+int arpGate = 127;
 
 int defaultVelocity = 100;
+int midiVelocity = 100;
 int octave = 0;			// default C4 is 0 - range is -4 to +5
 int newoctave = octave;
 int transpose = 0;
@@ -137,6 +157,7 @@ int V_scale;
 
 // clock
 float clockbpm = 120;
+int bpm = (int)clockbpm;;
 float newtempo = clockbpm;
 unsigned long tempoStartTime, tempoEndTime;
 
@@ -147,19 +168,162 @@ uint8_t swing = 0;
 const int maxswing = 100;
 // int swing_values[maxswing] = {0, 1, 3, 5, 52, 66, 70, 72, 80, 99 }; // 0 = off, <50 early swing , >50 late swing, 99=drunken swing
 
+typedef struct {
+	int note;
+	int channel;
+} midiNote;
+
 bool keyState[27] = {false};
 int midiKeyState[27] =     {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
 int midiChannelState[27] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
-int arpNotes[27] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+int arpSeq[ARP_SEQ_LEN];
+midiNote arpActiveNotes[16];
 int arpLastNote = -1;
-uint8_t arpIndex = 0;
-int rrChannel = 0;
+int arpLastChannel = -1;
+uint8_t arpIndex = -1;
+int rrIndex = 0;
 bool midiRoundRobin = false;
 int midiRRChannelCount = 1;
 int midiRRChannelOffset = 0;
 int currpgm = 0;
 int currbank = 0;
 bool midiInToCV = true;
+int midiChannel = 1;
+int midiLastNote = -1;
+
+void uiDrawValueInt(int* value, int x) {
+	u8g2centerNumber(*value, x*32, hline*2+3, 32, 22);
+}
+
+void uiDrawValueInt1(int* value, int x) {
+	u8g2centerNumber(*value+1, x*32, hline*2+3, 32, 22);
+}
+
+void uiDrawValuePercent(int* value, int x) {
+	// TODO
+	u8g2centerNumber(*value, x*32, hline*2+3, 32, 22);
+}
+
+char ccNameBuf[6];
+char noteBuffer[4];
+
+void uiDrawValueNote(int* value, int x) {
+	snprintf(noteBuffer, 4, "%s%i", noteNames[*value % 12], *value / 12);
+	u8g2centerText(noteBuffer, x*32, hline*2+3, 32, 22);
+}
+
+
+
+const ui_param midi_params[] = {
+	{
+		"OCT",
+		&octave,
+		false,
+		-1,
+		8,
+		uiDrawValueInt
+	},
+	{
+		"CH",
+		&midiChannel,
+		false,
+		1,
+		16,
+		uiDrawValueInt
+	},
+	{
+		"CC",
+		&potVal,
+		true,
+		0,
+		127,
+		uiDrawValueInt,
+		NULL,
+		[]()->char* {
+		  snprintf(ccNameBuf, 6, "CC%d", potCC);
+		  return ccNameBuf;
+		}
+	},
+	{
+		"NOTE",
+		&midiLastNote,
+		true,
+		0,
+		255,
+		uiDrawValueNote
+	},
+	///
+	{
+		"RR",
+		&midiRRChannelCount,
+		false,
+		1,
+		16,
+		uiDrawValueInt
+	},
+	{
+		"PGM",
+		&currpgm,
+		false,
+		0,
+		127,
+		uiDrawValueInt1
+	},
+	{
+		"BNK",
+		&currbank,
+		false,
+		0,
+		127,
+		uiDrawValueInt
+	},
+	{
+		"PBNK",
+		&potbank,
+		false,
+		0,
+		3,
+		uiDrawValueInt1
+	},
+	///
+	{
+		"A.SWG",
+		&arpSwing,
+		false,
+		-127,
+		127,
+		uiDrawValuePercent
+	},
+	{
+		"A.SPD",
+		&bpm,
+		false,
+		40,
+		400,
+		uiDrawValueInt,
+		[](int* valPtr, int newVal)->void {
+			*valPtr = newVal;
+			clockbpm = (float)newVal;
+			resetClocks();
+		}
+	},
+	{
+		"A.OCT",
+		&arpOctaves,
+		false,
+		1,
+		4,
+		uiDrawValueInt
+	},
+	{
+		"A.GAT",
+		&arpGate,
+		false,
+		0,
+		127,
+		uiDrawValuePercent
+	},
+};
 
 // ENCODER
 Encoder myEncoder(12, 11); 	// encoder pins on hardware
@@ -226,6 +390,8 @@ void setGlobalSwing(int swng_amt){
 void sendPots(int val, int channel){
 	MM::sendControlChange(pots[potbank][val], analogValues[val], channel);
 	potCC = pots[potbank][val];
+	Serial.print("potCC = ");
+	Serial.println(potCC);
 	potVal = analogValues[val];
 	potValues[val] = potVal;
 }
@@ -249,8 +415,12 @@ void readPotentimeters(){
 				case MODE_OM:
 						// fall through - same as MIDI
 				case MODE_MIDI: // MIDI
-					sendPots(k, midiChannel);
-					dirtyDisplay = true;
+					if(k == 4) {
+						midiVelocity = analogValues[k];
+					} else {
+						sendPots(k, midiChannel);
+						dirtyDisplay = true;
+					}
 					break;
 
 				case MODE_S2: // SEQ2
@@ -397,6 +567,14 @@ void setup() {
 	// clear LEDs
 	strip.fill(0, 0, LED_COUNT);
 	strip.show();
+
+	for(int i = 0; i < ARP_SEQ_LEN; i++) {
+		arpSeq[i] = -1;
+	}
+
+	// setup UI
+	snprintf(noteBuffer, 4, "---");
+	snprintf(ccNameBuf, 6, "CC---");
 
 	delay(100);
 
@@ -637,8 +815,8 @@ void show_current_step(int patternNum) {
 //				Serial.println(pixelpos);
 				
 				if (patternParams){
- 					strip.setPixelColor(pixelpos, SEQMARKER);
- 				}
+					strip.setPixelColor(pixelpos, SEQMARKER);
+				}
 
 				if(i % 4 == 0){ 					// MARK GROUPS OF 4
 					if(i == seqPos[patternNum]){
@@ -733,9 +911,17 @@ void invertColor(bool flip){
 		u8g2_display.setBackgroundColor(BLACK);
 	}
 }
-void dispValBox(int v, int16_t n, bool inv){			// n is box 0-3
-	invertColor(inv);
-	u8g2centerNumber(v, n*32, hline*2+3, 32, 22);
+
+void dispValBox(ui_param* param, int16_t n, bool selected){			// n is box 0-3
+	if(selected) {
+		u8g2_display.setForegroundColor(BLACK);
+		u8g2_display.setBackgroundColor(WHITE);
+	} else {
+		u8g2_display.setForegroundColor(WHITE);
+		u8g2_display.setBackgroundColor(BLACK);
+	}
+	param->drawValue(param->valuePtr, n);
+	//u8g2centerNumber(v, n*32, hline*2+3, 32, 22);
 }
 
 void dispSymbBox(const char* v, int16_t n, bool inv){			// n is box 0-3
@@ -746,46 +932,30 @@ void dispSymbBox(const char* v, int16_t n, bool inv){			// n is box 0-3
 void dispGenericMode(int submode, int selected){
 	const char* legends[4] = {"","","",""};
 	int legendVals[4] = {0,0,0,0};
-	int dispPage = 0;
+	int dispPage = selected / 4;
 	const char* legendText[4] = {"","","",""};
-//	int displaychan = midiChannel;
+	int start = dispPage * 4;
+	int numPages = 0;
+	int selectedOnPage = selected % 4;
+
 	switch(submode){
-		case SUBMODE_MIDI:			
-//			if (midiRoundRobin) {
-//				displaychan = rrChannel;
-//			}
-			legends[0] = "OCT";
-			legends[1] = "CH";
-			legends[2] = "CC";
-			legends[3] = "NOTE";
-			legendVals[0] = (int)octave+4;
-			legendVals[1] = midiChannel;
-			legendVals[2] = potVal;
-			legendVals[3] = midiLastNote;
-			dispPage = 1;
+		case SUBMODE_MIDI:
+			numPages = ARRAYLEN(midi_params) / 4;
+			for(int i = 0, j = start; i < 4; i++, j++) {
+				if(j < (int)ARRAYLEN(midi_params)) {
+					if(midi_params[j].getLabel != NULL) {
+						legends[i] = midi_params[j].getLabel();
+					} else {
+						legends[i] = midi_params[j].label;
+					}
+					legendVals[i] = *midi_params[j].valuePtr;
+				} else {
+					legends[i] = "";
+					legendVals[i] = 0;
+				}
+			}
 			break;
-		case SUBMODE_MIDI2:			
-			legends[0] = "RR";
-			legends[1] = "RROF";
-			legends[2] = "PGM";
-			legends[3] = "BNK";
-			legendVals[0] = midiRRChannelCount;
-			legendVals[1] = midiRRChannelOffset;
-			legendVals[2] = currpgm + 1;
-			legendVals[3] = currbank;
-			dispPage = 2;
-			break;
-		case SUBMODE_MIDI3:			
-			legends[0] = "PBNK";
-			legends[1] = "A.SPD";
-			legends[2] = "A.OCT";
-			legends[3] = "A.GAT";
-			legendVals[0] = potbank + 1;
-			legendVals[1] = clockbpm;
-			legendVals[2] = arpOctaves;
-			legendVals[3] = (int)(arpGate * 100.0f);
-			dispPage = 3;
-			break;
+	/*
 		case SUBMODE_SEQ:
 			legends[0] = "PTN";
 			legends[1] = "TRSP";
@@ -907,7 +1077,7 @@ void dispGenericMode(int submode, int selected){
 			}
 			dispPage = 3;
 			break;
-
+	*/
 		default:
 			break;
 	}
@@ -933,48 +1103,37 @@ void dispGenericMode(int submode, int selected){
 	u8g2_display.setBackgroundColor(BLACK);
 
 
-	switch(selected){
-		case 1:
-			display.fillRect(0*32+2, 9, 29, 21, WHITE);
-			break;
-		case 2: 	//
-			display.fillRect(1*32+2, 9, 29, 21, WHITE);
-			break;
-		case 3: 	//
-			display.fillRect(2*32+2, 9, 29, 21, WHITE);
-			break;
-		case 4: 	//
-			display.fillRect(3*32+2, 9, 29, 21, WHITE);
-			break;
-		case 0:
-		default:
-			break;
+	// draw white box on selected item
+	if((uiEditParam || midiAUX)) {
+		display.fillRect(selectedOnPage*32+2, 9, 29, 21, WHITE);
+	} else {
+		display.fillRect(selectedOnPage*32+2, 9+18, 29, 3, WHITE);
 	}
+
 	// ValueBoxes
 	int highlight = false;
-	for (int j = 1; j < NUM_DISP_PARAMS; j++){ // start at 1 to only highlight values 1-4
-
-		if (j == selected) {
+	for (int j = 0; j < 4; j++){
+		if ((uiEditParam || midiAUX) && j == selectedOnPage) {
 			highlight = true;
 		}else{
 			highlight = false;
 		}
-		if (legendVals[j-1] == -127){
-			dispSymbBox(legendText[j-1], j-1, highlight);
+		if (legendVals[j] == -127){
+			dispSymbBox(legendText[j], j, highlight);
 		} else {
-			dispValBox(legendVals[j-1], j-1, highlight);
+			dispValBox(&midi_params[start+j], j, highlight);
 		}
 	}
-	if (dispPage != 0) {		
-		for (int k=0; k<4; k++){
-			if (dispPage == k+1){
-				dispPageIndicators(k, true);
-			} else {
-				dispPageIndicators(k, false);
-			}
+	if(uiEditParam) {
+		// draw a hollow box around the value being edited
+	}
+	for (int k = 0; k < numPages; k++){
+		if (dispPage == k){
+			dispPageIndicators(k, true);
+		} else {
+			dispPageIndicators(k, false);
 		}
 	}
-	
 }
 
 void dispPageIndicators(int page, bool selected){
@@ -1068,6 +1227,12 @@ void loop() {
 
 	// ############### ENCODER ###############
 	//
+	if(pageWrapDelay > 0) {
+		pageWrapDelay--;
+	}
+	if(pageChangeDelay > 0) {
+		pageChangeDelay--;
+	}
 	auto u = myEncoder.update();
 	if (u.active()) {
 		auto amt = u.accel(5); // where 5 is the acceleration factor if you want it, 0 if you don't)
@@ -1109,75 +1274,46 @@ void loop() {
 						dirtyPixels = true;
 						break;
 					}
-					// CHANGE PAGE
-					if (miparam == 0 || miparam == 5 || miparam == 10) {
-						mmpage = constrain(mmpage + amt, 0, 2);
-						miparam = mmpage * NUM_DISP_PARAMS;
-					}
-					// PAGE ONE
-					if (miparam == 2) { 
-						int newchan = constrain(midiChannel + amt, 1, 16);
-						if (newchan != midiChannel){
-							midiChannel = newchan;
-						}
-					} else if (miparam == 1){
-						// set octave
-						newoctave = constrain(octave + amt, -5, 4);
-						if (newoctave != octave){
-							octave = newoctave;
-						}
-					}
-					// PAGE TWO
-					if (miparam == 6) { 
-						int newrrchan = constrain(midiRRChannelCount + amt, 1, 16);
-						if (newrrchan != midiRRChannelCount){
-							midiRRChannelCount = newrrchan;
-							if (midiRRChannelCount == 1){
-								midiRoundRobin = false;
-							}else{
-								midiRoundRobin = true;
+					if(uiEditParam || midiAUX) {
+						// edit current param
+						if(miparam < (int)ARRAYLEN(midi_params)) {
+							if(midi_params[miparam].readOnly == false) {
+								int newValue = constrain(*midi_params[miparam].valuePtr + amt, midi_params[miparam].min, midi_params[miparam].max);
+								if(midi_params[miparam].onChange != NULL) {
+									midi_params[miparam].onChange(midi_params[miparam].valuePtr, newValue);
+								} else {
+									*midi_params[miparam].valuePtr = newValue;
+								}
+								dirtyDisplay = true;
 							}
 						}
-					} else if (miparam == 7){
-						midiRRChannelOffset = constrain(midiRRChannelOffset + amt, 0, 15);
-					} else if (miparam == 8){
-						currpgm = constrain(currpgm + amt, 0, 127);
-
-						if (midiRoundRobin){
-							for (int q = midiRRChannelOffset+1 ; q < midiRRChannelOffset + midiRRChannelCount+1; q++){
-								MM::sendProgramChange(currpgm, q);
+					} else {
+						// scroll through params
+						if(pageChangeDelay == 0) {
+							if(pageWrapDelay > 0) {
+								miparam = constrain(miparam + SGN(amt), 0, (int)ARRAYLEN(midi_params)-1);
+							} else {
+								miparam = WRAP(miparam + SGN(amt), (int)ARRAYLEN(midi_params));
 							}
-						} else {
-							MM::sendProgramChange(currpgm, midiChannel);
+							if(SGN(amt) > 0 && miparam % 4 == 0) {
+								// landed on a new page, delay
+								pageChangeDelay = 75;
+							}
+							if(SGN(amt) < 0 && miparam % 4 == 3) {
+								// landed on a new page, delay
+								pageChangeDelay = 75;
+							}
+							if(miparam == (int)ARRAYLEN(midi_params)-1 && SGN(amt) > 0) {
+								// hit last param, add a delay
+								pageWrapDelay = 100;
+								pageChangeDelay = 0;
+							} else if(miparam == 1 && SGN(amt) < 0) {
+								pageWrapDelay = 100;
+								pageChangeDelay = 0;
+							}
+							dirtyDisplay = true;
 						}
-
-					} else if (miparam == 9){
-						currbank = constrain(currbank + amt, 0, 127);
-						// Bank Select is 2 mesages
-						MM::sendControlChange(0, 0, midiChannel);
-						MM::sendControlChange(32, currbank, midiChannel);
-						MM::sendProgramChange(currpgm, midiChannel);
 					}
-					// PAGE THREE
-					if (miparam == 11) { 
-						potbank = constrain(potbank + amt, 0, NUM_CC_BANKS-1);
-					} else if (miparam == 12) {
-						// set tempo (for arps)
-						newtempo = constrain(clockbpm + amt, 40, 300);
-						if (newtempo != clockbpm){
-							// SET TEMPO HERE
-							clockbpm = newtempo;
-							resetClocks();
-						}
-					} else if (miparam == 13) {
-						// arp octaves
-						arpOctaves = constrain(arpOctaves + amt, 1, 4);
-						arpOctaveIndex = constrain(arpOctaveIndex, 0, arpOctaves - 1);
-					} else if (miparam == 14) {
-						// arp gate
-						arpGate = constrain(arpGate + (float)amt * 0.01f, 0.0f, 1.0f);
-					}
-					dirtyDisplay = true;
 					break;
 				case MODE_S1: // SEQ 1
 					// FALL THROUGH
@@ -1427,9 +1563,7 @@ void loop() {
 			}
 
 			if(omxMode == MODE_MIDI) {
-				// switch midi oct/chan selection
-				miparam = (miparam + 1 ) % 15;
-				mmpage = miparam / NUM_DISP_PARAMS;
+				uiEditParam = !uiEditParam;
 			}
 			if(omxMode == MODE_OM) {
 				miparam = (miparam + 1 ) % NUM_DISP_PARAMS;
@@ -1539,29 +1673,30 @@ void loop() {
 							} else if (thisKey == 1 || thisKey == 2) {
 								int chng = thisKey == 1 ? -1 : 1;
 								miparam = constrain((miparam + chng ) % 15, 0, 14);
-								mmpage = miparam / NUM_DISP_PARAMS;
 							}
 						} else if (thisKey == 3) {
 							arp = !arp;
-							for(int i = 0; i < 27; i++) {
-								arpNotes[i] = -1;
-								arpIndex = 0;
+							for(int i = 0; i < ARP_SEQ_LEN; i++) {
+								arpSeq[i] = -1;
+								arpIndex = -1;
 								arpTimer = 0;
+								arpSwingIndex = 0;
 							}
 							if(arpLastNote != -1) {
-								rawNoteOff(arpLastNote, rrChannel);
+								rawNoteOff(arpLastNote, arpLastChannel);
 							}
 						} else if (thisKey == 4) {
 							if(arp) {
 								arpLatch = !arpLatch;
 								if(arpLatch == false) {
-									for(int i = 0; i < 27; i++) {
-										arpNotes[i] = -1;
-										arpIndex = 0;
+									for(int i = 0; i < ARP_SEQ_LEN; i++) {
+										arpSeq[i] = -1;
+										arpIndex = -1;
 										arpTimer = 0;
+										arpSwingIndex = 0;
 									}
 									if(arpLastNote != -1) {
-										rawNoteOff(arpLastNote, rrChannel);
+										rawNoteOff(arpLastNote, arpLastChannel);
 									}
 								}
 							}
@@ -1592,10 +1727,9 @@ void loop() {
 							// show the name of the scale for a moment
 							setMessage(scaleNames[scalePattern], 1000);
 							dirtyPixels = true;
-							//midiNoteOn(thisKey, defaultVelocity, midiChannel);
 						}
 					} else {
-						midiNoteOn(thisKey, defaultVelocity, midiChannel);
+						midiNoteOn(thisKey, midiVelocity, midiChannel);
 					}
 				} else if(e.bit.EVENT == KEY_JUST_RELEASED && thisKey != 0) {
 					//Serial.println(" released");
@@ -1609,6 +1743,7 @@ void loop() {
 //					MM::sendControlChange(CC_AUX, 100, midiChannel);
 
 					midiAUX = true;
+					dirtyDisplay = true;
 
 //					if (midiAUX) {
 //						// STOP CLOCK
@@ -1625,11 +1760,14 @@ void loop() {
 //					MM::sendControlChange(CC_AUX, 0, midiChannel);
 					if (midiAUX) { 
 						midiAUX = false; 
+						dirtyDisplay = true;
 					}
 					// turn off leds
 					strip.setPixelColor(0, LEDOFF);
 					strip.setPixelColor(1, getDefaultColor(1));
 					strip.setPixelColor(2, getDefaultColor(2));
+					strip.setPixelColor(3, getDefaultColor(3));
+					strip.setPixelColor(4, getDefaultColor(4));
 					strip.setPixelColor(11, getDefaultColor(11));
 					strip.setPixelColor(12, getDefaultColor(12));
 				}
@@ -1971,15 +2109,7 @@ void loop() {
 
 			if (dirtyDisplay){			// DISPLAY
 				if (!enc_edit){
-					int pselected = miparam % NUM_DISP_PARAMS;
-					if (mmpage == 0){
-						dispGenericMode(SUBMODE_MIDI, pselected);
-					} else if (mmpage == 1){
-						dispGenericMode(SUBMODE_MIDI2, pselected);
-					} else if (mmpage == 2){
-						dispGenericMode(SUBMODE_MIDI3, pselected);
-					}
-					
+					dispGenericMode(SUBMODE_MIDI, miparam);
 				}
 			}
 			break;
@@ -2099,7 +2229,7 @@ void step_ahead(int patternNum) {
 //				seqPos[j] = PatternLength(j)-1;
 		} else {
 			seqPos[j]++;
- 			auto_reset(j); // determine whether to reset or not based on param settings
+			auto_reset(j); // determine whether to reset or not based on param settings
 //			if (seqPos[j] >= PatternLength(j))
 //				seqPos[j] = 0;
 		}
@@ -2176,14 +2306,14 @@ void auto_reset(int p){
 
 bool probResult(int probSetting){
 //	int tempProb = (rand() % probSetting);
- 	if (probSetting == 0){
- 		return false;
- 	}
+	if (probSetting == 0){
+		return false;
+	}
 	if((rand() % 100) < probSetting){ // assumes probSetting is a range 0-100
- 		return true;
- 	} else {
- 		return false;
- 	}
+		return true;
+	} else {
+		return false;
+	}
  }
 
 bool evaluate_AB(int condition, int patternNum) {
@@ -2263,23 +2393,27 @@ void step_off(int patternNum, int position){
 
 void doArpStep(Micros dt) {
 	arpTimer -= dt;
-	if(arpTimer < (float)step_micros * (1.0f - arpGate)) {
+	if(arpTimer < (float)arpTime * (1.0f - ((float)arpGate / 127.0f))) {
 		if(arpLastNote != -1) {
-			rawNoteOff(arpLastNote, rrChannel);
+			rawNoteOff(arpLastNote, arpLastChannel);
 			arpLastNote = -1;
+			arpLastChannel = -1;
 		}
-		rrChannel = (rrChannel % midiRRChannelCount) + 1;
 	}
 	if(arpTimer < 0) {
-		arpTimer += step_micros;
+		float swing = ((float)arpSwing / 255.0f);
+		Micros arpStepMicros = (Micros)((float)step_micros * (1.0f + (arpSwingIndex == 0 ? swing : -swing)));
+		arpSwingIndex = (arpSwingIndex + 1) % 2;
+		arpTime = arpStepMicros;
+		arpTimer += arpStepMicros;
 		// next note
-		arpIndex = (arpIndex + 1) % 27;
+		arpIndex = (arpIndex + 1) % ARP_SEQ_LEN;
 		// find next valid note
-		int note = arpNotes[arpIndex];
+		int note = arpSeq[arpIndex];
 		if(note == -1) {
-			for(int i = 0; i < 27; i++) {
-				arpIndex = (arpIndex + 1) % 27;
-				note = arpNotes[arpIndex];
+			for(int i = 0; i < ARP_SEQ_LEN; i++) {
+				arpIndex = (arpIndex + 1) % ARP_SEQ_LEN;
+				note = arpSeq[arpIndex];
 				if(note != -1) {
 					break;
 				}
@@ -2290,8 +2424,11 @@ void doArpStep(Micros dt) {
 				arpOctaveIndex = (arpOctaveIndex + 1) % arpOctaves;
 			}
 			note += 12 * arpOctaveIndex;
-			rawNoteOn(note, defaultVelocity, rrChannel);
+			int channel = midiChannel + rrIndex;
+			rawNoteOn(note, midiVelocity, channel);
 			arpLastNote = note;
+			arpLastChannel = channel;
+			rrIndex = (rrIndex + 1) % midiRRChannelCount;
 		}
 	}
 }
@@ -2400,23 +2537,13 @@ void OnNoteOn(byte channel, byte note, byte velocity) {
 	}
 	if (omxMode == MODE_MIDI){				
 		midiLastNote = note;
-		int whatoct = (note / 12);
+		int whatoct = (note / 12) - octave;
 		int thisKey;
 		uint32_t keyColor = MIDINOTEON;
-
 		if ( (whatoct % 2) == 0) {
 			thisKey = note - (12 * whatoct);
 		} else {
 			thisKey = note - (12 * whatoct) + 12;
-		}
-		if (whatoct == 0){ // ORANGE,YELLOW,GREEN,MAGENTA,CYAN,BLUE,LIME,LTPURPLE
-		} else if(whatoct == 1){ keyColor = ORANGE;
-		} else if(whatoct == 2){ keyColor = YELLOW; 
-		} else if(whatoct == 3){ keyColor = GREEN;
-		} else if(whatoct == 4){ keyColor = MAGENTA;
-		} else if(whatoct == 5){ keyColor = CYAN;
-		} else if(whatoct == 6){ keyColor = LIME;
-		} else if(whatoct == 7){ keyColor = CYAN;
 		}
 		strip.setPixelColor(midiKeyMap[thisKey], keyColor);         //  Set pixel's color (in RAM)
 	//	dirtyPixels = true;	
@@ -2447,8 +2574,7 @@ void OnNoteOff(byte channel, byte note, byte velocity) {
 // #### Outbound MIDI Mode note on/off
 void midiNoteOn(int keynum, int velocity, int channel) {
 	int adjnote = notes[keynum] + (octave * 12); // adjust key for octave range
-	rrChannel = (rrChannel % midiRRChannelCount) + 1;
-	int adjchan = rrChannel;
+	int adjchan = channel;
 
 	if (adjnote>=0 && adjnote <128){
 		midiLastNote = adjnote;
@@ -2459,7 +2585,7 @@ void midiNoteOn(int keynum, int velocity, int channel) {
 		if(!arp) {
 			// RoundRobin Setting?
 			if (midiRoundRobin) {
-				adjchan = rrChannel + midiRRChannelOffset;
+				adjchan = channel + rrIndex;
 			} else {
 				adjchan = channel;
 			}
@@ -2479,20 +2605,21 @@ void midiNoteOn(int keynum, int velocity, int channel) {
 					}
 				}
 				if(anyKeysDown == false) {
-					for(int i = 0; i < 27; i++) {
-						if(arpNotes[i] != -1) {
+					for(int i = 0; i < ARP_SEQ_LEN; i++) {
+						if(arpSeq[i] != -1) {
 							latchTransition = true;
 						}
-						arpNotes[i] = -1;
+						arpSeq[i] = -1;
 					}
 				}
 			}
-			for(int i = 0; i < 27; i++) {
-				if(arpNotes[i] == -1) {
-					arpNotes[i] = adjnote;
+			for(int i = 0; i < ARP_SEQ_LEN; i++) {
+				if(arpSeq[i] == -1) {
+					arpSeq[i] = adjnote;
 					if(i == 0 && latchTransition == false) {
 						arpIndex = -1;
 						arpTimer = 0;
+						arpSwingIndex = 0;
 					}
 					break;
 				}
@@ -2504,6 +2631,8 @@ void midiNoteOn(int keynum, int velocity, int channel) {
 	strip.setPixelColor(keynum, MIDINOTEON);         //  Set pixel's color (in RAM)
 	dirtyPixels = true;
 	dirtyDisplay = true;
+
+	rrIndex = (rrIndex + 1) % midiRRChannelCount;
 }
 
 void midiNoteOff(int keynum, int channel) {
@@ -2520,9 +2649,9 @@ void midiNoteOff(int keynum, int channel) {
 		}
 	} else {
 		if(arpLatch == false) {
-			for(int i = 0; i < 27; i++) {
-				if(arpNotes[i] == adjnote) {
-					arpNotes[i] = -1;
+			for(int i = 0; i < ARP_SEQ_LEN; i++) {
+				if(arpSeq[i] == adjnote) {
+					arpSeq[i] = -1;
 					break;
 				}
 			}
@@ -2861,7 +2990,7 @@ void rainbow(int wait) {
 			// Here we're using just the single-argument hue variant. The result
 			// is passed through strip.gamma32() to provide 'truer' colors
 			// before assigning to each pixel:
-			strip.setPixelColor(i, strip.gamma32(strip.ColorHSV(pixelHue)));
+			strip.setPixelColor(i, strip.gamma32(strip.ColorHSV(pixelHue, 127, 255)));
 		}
 		strip.show(); // Update strip with new contents
 		delay(wait);  // Pause for a moment

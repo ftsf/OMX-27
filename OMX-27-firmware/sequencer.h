@@ -3,8 +3,6 @@
 #define NUM_STEPKEYS 16
 
 // the MIDI channel number to send messages
-int midiChannel = 1;
-
 int ticks = 0;            // A tick of the clock
 bool clockSource = 0;     // Internal clock (0), external clock (1)
 bool playing = 0;         // Are we playing?
@@ -124,8 +122,6 @@ StepNote stepNoteP[NUM_PATTERNS][NUM_STEPS];
 uint8_t lastNote[NUM_PATTERNS][NUM_STEPS] = {
 	{0},{0},{0},{0},{0},{0},{0},{0}
 };
-
-uint8_t midiLastNote = 0;
 
 StepNote copyPatternBuffer[NUM_STEPS] = {
   {0, 0, 0, TRIGTYPE_MUTE, { -1, -1, -1, -1, -1}, 100, 0, STEPTYPE_NONE },
