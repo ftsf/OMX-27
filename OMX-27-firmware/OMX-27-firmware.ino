@@ -208,8 +208,12 @@ char ccNameBuf[6];
 char noteBuffer[4];
 
 void uiDrawValueNote(int* value, int x) {
-	snprintf(noteBuffer, 4, "%s%i", noteNames[*value % 12], *value / 12);
-	u8g2centerText(noteBuffer, x*32, hline*2+3, 32, 22);
+	if(*value < 0) {
+		u8g2centerText("---", x*32, hline*2+3, 32, 22);
+	} else {
+		snprintf(noteBuffer, 4, "%s%i", noteNames[*value % 12], *value / 12);
+		u8g2centerText(noteBuffer, x*32, hline*2+3, 32, 22);
+	}
 }
 
 
