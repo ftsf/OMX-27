@@ -149,7 +149,7 @@ const char* noteNames[] = {
 
 
 void setScale(int scaleRoot, int scalePattern) {
-	if(scaleRoot == -1) {
+	if(scalePattern == -1) {
 		// disabled
 		for(int n = 0; n < 12; n++) {
 			scaleOffsets[n] = -1;
