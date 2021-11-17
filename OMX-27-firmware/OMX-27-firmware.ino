@@ -2019,11 +2019,6 @@ void loop() {
 	//							if ( stepNoteP[playingPattern][keyPos].stepType == STEPTYPE_PLAY || stepNoteP[playingPattern][keyPos].stepType == STEPTYPE_MUTE ) {
 	//								stepNoteP[playingPattern][keyPos].stepType = ( stepNoteP[playingPattern][keyPos].stepType == STEPTYPE_PLAY ) ? STEPTYPE_MUTE : STEPTYPE_PLAY;
 	//							}
-								if ( stepNoteP[playingPattern][seqKey].trig == TRIGTYPE_PLAY) {
-									stepNoteP[playingPattern][seqKey].trig = TRIGTYPE_MUTE;
-								} else if(stepNoteP[playingPattern][seqKey].trig == TRIGTYPE_MUTE) {
-									stepNoteP[playingPattern][seqKey].trig = TRIGTYPE_PLAY;
-								}
 								seqStepHold = seqKey;
 								selectedStep = seqKey;
 								dirtyDisplay = true;
@@ -2036,6 +2031,14 @@ void loop() {
 					if(seqStepHold == seqKey) {
 						seqStepHold = -1;
 						dirtyDisplay = true;
+						// if short press do toggle
+						if(keyPressTime[thisKey] <= shortPressInterval) {
+							if ( stepNoteP[playingPattern][seqKey].trig == TRIGTYPE_PLAY) {
+								stepNoteP[playingPattern][seqKey].trig = TRIGTYPE_MUTE;
+							} else if(stepNoteP[playingPattern][seqKey].trig == TRIGTYPE_MUTE) {
+								stepNoteP[playingPattern][seqKey].trig = TRIGTYPE_PLAY;
+							}
+						}
 					}
 				}
 
