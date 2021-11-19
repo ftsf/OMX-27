@@ -75,7 +75,7 @@ const uint32_t sequencePageColors[] = {RED, ORANGE, YELLOW, LIME};
 
 const auto MIDINOTEON = HALFWHITE;
 const auto SEQCHASE = DKRED;
-const auto SEQMARKER = LOWWHITE;
+const auto SEQMARKER = 0x080808;
 const auto SEQSTEP = ORANGE;
 
 const auto NOTESEL = DKCYAN;

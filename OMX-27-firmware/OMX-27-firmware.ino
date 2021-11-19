@@ -35,6 +35,7 @@
 #define IS_STEP(x) ((x) > 10)
 #define PATTERN(x) ((x) - 3)
 #define STEP(x) ((x) - 11)
+#define PAGE(x) ((x) - 11 - 4)
 
 typedef struct {
 	const char* label;
@@ -205,8 +206,13 @@ int previewLastChannel = -1;
 int seqStepHold = false;
 int seqStepEdit = false;
 int patternHold = false;
+int patternEdit = false;
+int patternEditLock = false;
 
 int messageTextTimer = 0;
+
+int clearedPageTimer = 0;
+int clearedPage = -1;
 
 const auto uiDrawTextY = 20;
 
@@ -1063,6 +1069,8 @@ void readPotentimeters(){
 						if(sendPotsDuringPLock) {
 							sendPots(k, PatternChannel(viewingPattern));
 						}
+						setScale(scaleRoot, scalePattern);
+						dirtyPixels = true;
 						dirtyDisplay = true;
 
 					} else if (stepRecord){
@@ -1322,7 +1330,17 @@ void drawPatternLEDs(int patternNum) {
 	auto currentpage = patternPage[patternNum];
 	auto pagestepstart = (currentpage * NUM_STEPKEYS);
 
-	if (stepRecord) {
+	if (seqStepHold) {
+        // show the scale for reference
+		for(int j = 1; j < 27; j++){
+			if(STEP(j) == selectedStep) {
+				int note = stepNoteP[viewingPattern][selectedStep].note;
+				strip.setPixelColor(j, strip.gamma32(strip.ColorHSV((65535 / 12) * ((note - scaleRoot) % 12), rainbowSaturation, 255)));
+			} else {
+				strip.setPixelColor(j, getDefaultColor(j));
+			}
+		}
+	} else if (stepRecord) {
 	
 //		for(int j = 1; j < NUM_STEPKEYS+11; j++){
 //			if (j < PatternLength(patternNum)+11){
@@ -1353,7 +1371,7 @@ void drawPatternLEDs(int patternNum) {
 //				strip.setPixelColor(i+11, LEDOFF);
 //			}
 //		}	
-	} else if (patternHold){
+	} else if (patternEdit) {
 		// TURN OFF STEP LEDS
 		for(int j = 11; j < 27; j++){
 			strip.setPixelColor(j, LEDOFF);
@@ -1372,6 +1390,34 @@ void drawPatternLEDs(int patternNum) {
 				color = blinkState ? color : SEQCHASE;
 			}
 			strip.setPixelColor(11 + 4 + h, color);
+		}
+		// transpose keys
+		strip.setPixelColor(11, ORANGE);
+		strip.setPixelColor(12, RBLUE);
+		strip.setPixelColor(25, RBLUE);
+		strip.setPixelColor(26, ORANGE);
+		// restart
+		strip.setPixelColor(11 + 9, CYAN);
+		// reverse
+		strip.setPixelColor(11 + 10, MAGENTA);
+		// toggle FX
+		strip.setPixelColor(11 + 11, YELLOW);
+		// toggle plock
+		strip.setPixelColor(11 + 12, MINT);
+
+		// show pattern
+		for(int j = 3; j < 11; j++){
+			if (j == viewingPattern+3){  			// PATTERN SELECT
+				if(playing && PATTERN(j) == playingPattern) {
+					strip.setPixelColor(j, blinkState ? SEQCHASE : stepColor);
+				} else {
+					strip.setPixelColor(j, stepColor);
+				}
+			} else if(playing && PATTERN(j) == playingPattern) {
+				strip.setPixelColor(j, blinkState ? SEQCHASE : seqColors[PATTERN(j)]);
+			} else {
+				strip.setPixelColor(j, LEDOFF);
+			}
 		}
 	} else {
 		for(int j = 1; j < NUM_STEPKEYS+11; j++){
@@ -1811,7 +1857,7 @@ bool handleKeyEventSeq(keypadEvent e) {
 	int seqKey = keyPos + (patternPage[viewingPattern] * NUM_STEPKEYS);
 	bool down = e.bit.EVENT == KEY_JUST_PRESSED;
 
-	if(patternHold == false) {
+	if(patternEdit == false && seqStepHold == false) {
 		if(down == false && (thisKey == 1 || thisKey == 2)) {
 			setMessage(0);
 			if(F1_HELD) {
@@ -1871,18 +1917,34 @@ bool handleKeyEventSeq(keypadEvent e) {
 	} else {
 		// REGULAR SEQ MODE
 		// BLACK KEYS - SELECT PATTERN
-		if(down && IS_PATTERN(thisKey)) {
+		if (patternHold && down && IS_PATTERN(thisKey)) { // WHILE HOLDING PATTERN
+			if(patternEditLock) {
+				patternEditLock = false;
+				patternHold = false;
+				patternEdit = false;
+				dirtyDisplay = true;
+				dirtyPixels = true;
+			} else {
+				patternEditLock = true;
+			}
+			return true;
+		} else if(down && IS_PATTERN(thisKey)) {
 			if(auxShift && F1_HELD == false && F2_HELD == false && IS_PATTERN(thisKey)) {
 				if(playing) {
 					// cue next pattern
 					nextPlayingPattern = thisKey-3;
 					seqPos[nextPlayingPattern] = 0;
+
+					snprintf(messageText, MESSAGE_TEXT_LEN, "CUE P%d", nextPlayingPattern+1);
+					setMessage(500);
 				} else {
 					// step record
 					viewingPattern = thisKey-3;
 					seqPos[viewingPattern] = 0;
 					stepRecord = true;
 					dirtyDisplay = true;
+					snprintf(messageText, MESSAGE_TEXT_LEN, "STEP RECORD");
+					setMessage(500);
 				}
 				return true;
 			} else if (F1_HELD && F2_HELD) {
@@ -1905,17 +1967,23 @@ bool handleKeyEventSeq(keypadEvent e) {
 					setMessage(500);
 				}
 			} else {
+				// switch pattern
 				int prevPattern = viewingPattern;
 				viewingPattern = PATTERN(thisKey);
 				if(viewingPattern != prevPattern) {
 					selectedStep = 0;
-					seqPos[viewingPattern] = 0;
-					dirtyDisplay = true;
-					dirtyPixels = true;
+					if(!playing) {
+						seqPos[viewingPattern] = 0;
+					}
+				} else {
+					patternEditLock = false;
 				}
 				seqStepEdit = false;
 				seqStepHold = false;
 				patternHold = true;
+				patternEdit = true;
+				dirtyDisplay = true;
+				dirtyPixels = true;
 
 				//snprintf(messageText, MESSAGE_TEXT_LEN, "P%d PAGE SELECT", viewingPattern+1);
 				//setMessage(500);
@@ -1928,25 +1996,41 @@ bool handleKeyEventSeq(keypadEvent e) {
 			}
 		} else if(down && IS_STEP(thisKey)) {
 			// SEQUENCE 1-16 STEP KEYS
-			if (patternHold) { // WHILE HOLDING PATTERN
+			if (patternEdit) { // WHILE HOLDING PATTERN
 				if(F1_HELD && F2_HELD) { // clear page
-					// using twice will trunctate pattern
-					clearPage(viewingPattern, STEP(thisKey));
-					snprintf(messageText, MESSAGE_TEXT_LEN, "cleared page %d", STEP(thisKey)+1);
-					setMessage(500);
+					if(clearedPage == PAGE(thisKey) && clearedPageTimer > 0) {
+						// using twice will remove page
+						int newPage = PAGE(thisKey)-1;
+						SetPatternLength(viewingPattern, (newPage+1) * NUM_STEPKEYS);
+						clearedPage = -1;
+						clearedPageTimer = 0;
+						snprintf(messageText, MESSAGE_TEXT_LEN, "removed page %d", PAGE(thisKey)+1);
+						if(selectedStep > PatternLength(viewingPattern)) {
+							selectedStep = CLAMP(selectedStep, 0, PatternLength(viewingPattern)-1);
+						}
+						setMessage(500);
+					} else {
+						clearPage(viewingPattern, PAGE(thisKey));
+						snprintf(messageText, MESSAGE_TEXT_LEN, "cleared page %d", PAGE(thisKey)+1);
+						setMessage(500);
+
+						clearedPage = PAGE(thisKey);
+						clearedPageTimer = shortPressInterval;
+					}
+
 				} else if(F1_HELD) { // copy page
-					copyPage(viewingPattern, STEP(thisKey));
-					snprintf(messageText, MESSAGE_TEXT_LEN, "copied page %d", STEP(thisKey)+1);
+					copyPage(viewingPattern, PAGE(thisKey));
+					snprintf(messageText, MESSAGE_TEXT_LEN, "copied page %d", PAGE(thisKey)+1);
 					setMessage(500);
 				} else if(F2_HELD) { // paste page
-					pastePage(viewingPattern, STEP(thisKey));
-					snprintf(messageText, MESSAGE_TEXT_LEN, "pasted page %d", STEP(thisKey)+1);
+					pastePage(viewingPattern, PAGE(thisKey));
+					snprintf(messageText, MESSAGE_TEXT_LEN, "pasted page %d", PAGE(thisKey)+1);
 					setMessage(500);
 				} else {
-					if(STEP(thisKey) >= 4 && STEP(thisKey) <= 7) {
+					if(PAGE(thisKey) >= 0 && PAGE(thisKey) <= 4) {
 						// select pattern page
 						int lastPage = patternPage[viewingPattern];
-						int newPage = STEP(thisKey)-4;
+						int newPage = PAGE(thisKey);
 						if(newPage >= PatternPages(viewingPattern)) {
 							// extend pattern
 							SetPatternLength(viewingPattern, (newPage+1) * NUM_STEPKEYS);
@@ -1976,7 +2060,7 @@ bool handleKeyEventSeq(keypadEvent e) {
 						dirtyDisplay = true;
 					} else if(STEP(thisKey) == 1 || STEP(thisKey) == 14) {
 						// transpose pattern by half-step
-						int transpose = STEP(thisKey) == 0 ? -1 : 1;
+						int transpose = STEP(thisKey) == 1 ? -1 : 1;
 						transposeSeq(viewingPattern, transpose);
 						dirtyDisplay = true;
 					} else if(STEP(thisKey) == 9) {
@@ -2011,6 +2095,7 @@ bool handleKeyEventSeq(keypadEvent e) {
 				dirtyPixels = true;
 				dirtyDisplay = true;
 				invalidateShortPress[thisKey] = false;
+                setScale(scaleRoot, scalePattern);
 			}
 		}
 	}
@@ -2054,6 +2139,9 @@ bool handleKeyEventSeq(keypadEvent e) {
 		}
 		if(anyKeysDown == false) {
 			patternHold = false;
+			if(patternEditLock == false) {
+				patternEdit = false;
+			}
 			setMessage(0);
 			dirtyDisplay = true;
 		} else {
@@ -2153,6 +2241,9 @@ void loop() {
 	}
 	if(pageChangeDelay > 0) {
 		pageChangeDelay--;
+	}
+	if(clearedPageTimer > 0) {
+		clearedPageTimer--;
 	}
 
 	switch(omxMode) {
@@ -2292,6 +2383,8 @@ void loop() {
 					seqStepHold = false;
 					seqStepEdit = false;
 					patternHold = false;
+					patternEditLock = false;
+					patternEdit = false;
 					scaleSelectHold = false;
 					seqStop();
 					setAllLEDS(0,0,0);
@@ -2451,6 +2544,7 @@ void auto_reset(int p){
 		playingPattern = nextPlayingPattern;
 		nextPlayingPattern = -1;
 		seqPos[playingPattern] = 0;
+        step_ahead(playingPattern);
 		//patternPage[p] = getPatternPage(seqPos[p]); // FOLLOW MODE FOR SEQ PAGE
 		return;
 	}
@@ -3160,6 +3254,8 @@ void clearPattern(int patternNum){
 		stepNoteP[patternNum][i].prob = 100;
 		stepNoteP[patternNum][i].condition = 0;
 	}
+	// also revert settings
+	patternSettings[patternNum] = { 15, patternNum, 0, 0, 0, 0, 1, 3, 1, 0, false, false, false, false };
 }
 
 void copyStep(int patternNum, int step){
