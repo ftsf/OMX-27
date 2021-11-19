@@ -1330,7 +1330,7 @@ void drawPatternLEDs(int patternNum) {
 	auto currentpage = patternPage[patternNum];
 	auto pagestepstart = (currentpage * NUM_STEPKEYS);
 
-	if (seqStepHold) {
+	if (seqStepHold && *param == 1) {
         // show the scale for reference
 		for(int j = 1; j < 27; j++){
 			if(STEP(j) == selectedStep) {
@@ -1885,6 +1885,7 @@ bool handleKeyEventSeq(keypadEvent e) {
 			// you can enter the note under the current step by holding any other note, releasing the step and then pressing the step again
 			int adjnote = notes[thisKey] + (octave * 12);
 			stepNoteP[viewingPattern][selectedStep].note = adjnote;
+			stepNoteP[viewingPattern][selectedStep].trig = TRIGTYPE_PLAY;
 			invalidateShortPress[11+seqStepHold] = true;
 			// play note if stopped
 			if(!playing) {
