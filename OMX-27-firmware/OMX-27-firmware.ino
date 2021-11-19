@@ -2201,6 +2201,7 @@ void handleKeyEvent(keypadEvent e) {
 		case MODE_MIDI: handleKeyEventMidi(e, false); break;
 		case MODE_S1:
 		case MODE_S2: handleKeyEventSeq(e); break;
+		default:
 		case MODE_CONFIG: break;
 	}
 }
@@ -3256,7 +3257,7 @@ void clearPattern(int patternNum){
 		stepNoteP[patternNum][i].condition = 0;
 	}
 	// also revert settings
-	patternSettings[patternNum] = { 15, patternNum, 0, 0, 0, 0, 1, 3, 1, 0, false, false, false, false };
+	patternSettings[patternNum] = { 15, (uint8_t)patternNum, 0, 0, 0, 0, 1, 3, 1, 0, false, false, false, false };
 }
 
 void copyStep(int patternNum, int step){
