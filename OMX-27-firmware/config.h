@@ -11,11 +11,15 @@ enum OMXMode
      MODE_S1,
      MODE_S2,
      MODE_OM,
+     MODE_CONFIG,
 
      NUM_OMX_MODES
 };
 
 extern const OMXMode DEFAULT_MODE;
+
+extern uint8_t rainbowSaturation;
+extern uint8_t scaleBrightness;
 
 // Increment this when data layout in EEPROM changes. May need to write version upgrade readers when this changes.
 extern const uint8_t EEPROM_VERSION;
@@ -97,24 +101,6 @@ struct InfoDialogs {
 };
 
 extern InfoDialogs infoDialog[NUM_DIALOGS];
-
-enum SubModes
-{
-	SUBMODE_MIDI = 0,
-	SUBMODE_SEQ,
-	SUBMODE_SEQ2,
-	SUBMODE_NOTESEL,
-	SUBMODE_NOTESEL2,
-	SUBMODE_NOTESEL3,
-	SUBMODE_PATTPARAMS,
-	SUBMODE_PATTPARAMS2,
-	SUBMODE_PATTPARAMS3,
-	SUBMODE_STEPREC,
-	SUBMODE_MIDI2,
-	SUBMODE_MIDI3,
-
-	SUBMODES_COUNT
-};
 
 // KEY SWITCH ROWS/COLS
 #define ROWS 5 //five rows

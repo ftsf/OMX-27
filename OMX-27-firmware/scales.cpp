@@ -2,6 +2,7 @@
 #include "scales.h"
 #include "colors.h"
 #include "util.h"
+#include "config.h"
 
 int scaleOffsets[12];
 int scaleDegrees[12];
@@ -176,7 +177,7 @@ void setScale(int scaleRoot, int scalePattern) {
 			if(degree == -1) {
 				scaleColors[n] = LEDOFF;
 			} else {
-				scaleColors[n] = strip.gamma32(strip.ColorHSV((65535 / 12) * offset, 127, 200));
+				scaleColors[n] = strip.gamma32(strip.ColorHSV((65535 / 12) * offset, rainbowSaturation, scaleBrightness));
 			}
 		}
 	}
