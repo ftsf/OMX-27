@@ -2146,8 +2146,17 @@ bool handleKeyEventSeq(keypadEvent e) {
 						transposeSeq(viewingPattern, transpose);
 						dirtyDisplay = true;
 					} else if(KEY_TO_STEP(thisKey) == 8) {
-						// toggle mute for pattern
-						patternSettings[viewingPattern].mute = !patternSettings[viewingPattern].mute;
+						// toggle mute for pattern S2, cue pattern S1
+						if(omxMode == MODE_S1) {
+							// cue next pattern
+							nextPlayingPattern = viewingPattern;
+							seqPos[nextPlayingPattern] = 0;
+							snprintf(messageText, MESSAGE_TEXT_LEN, "CUE P%d", nextPlayingPattern+1);
+							setMessage(500);
+						} else {
+							// toggle mute for pattern
+							patternSettings[viewingPattern].mute = !patternSettings[viewingPattern].mute;
+						}
 					} else if(KEY_TO_STEP(thisKey) == 9) {
 						// reset to start
 						seqPos[viewingPattern] = 0;
