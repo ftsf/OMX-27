@@ -33,9 +33,12 @@
 #define F2_HELD keyState[2]
 #define IS_PATTERN(x) ((x) > 2 && (x) < 11)
 #define IS_STEP(x) ((x) > 10)
-#define PATTERN(x) ((x) - 3)
-#define STEP(x) ((x) - 11)
-#define PAGE(x) ((x) - 11 - 4)
+#define KEY_TO_PATTERN(x) ((x) - 3)
+#define KEY_TO_STEP(x) ((x) - 11)
+#define KEY_TO_PAGE(x) ((x) - 11 - 4)
+#define PATTERN_TO_KEY(x) ((x) + 3)
+#define STEP_TO_KEY(x) ((x) + 11)
+#define PAGE_TO_KEY(x) ((x) + 11 + 4)
 
 typedef struct {
 	const char* label;
@@ -132,12 +135,30 @@ bool sendPotsDuringPLock = false;
 int scaleRoot = 0;
 int scalePattern = -1;
 bool scaleSelectHold;
+bool showScaleInSeq = false;
 
 uint32_t stepColor = 0x000000;
 uint32_t muteColor = 0x000000;
 
 bool mode_select = false;
 bool auxShift = false;
+
+int dangerConfirm = 0;
+#define DANGER_CONFIRM_TIME 300
+
+// macro that allows us to wrap a block of code in a confirm dialog requiring double press of key
+#define DANGER_CONFIRM(key, msg, ...) { \
+	if(dangerConfirm != key) { \
+		snprintf(messageText, MESSAGE_TEXT_LEN, msg); \
+		dangerConfirm = (key); \
+		setMessage(DANGER_CONFIRM_TIME); \
+		dangerConfirmTimeout = DANGER_CONFIRM_TIME; \
+	} else { \
+		__VA_ARGS__ \
+	} \
+}
+
+int dangerConfirmTimeout = 0;
 
 bool arp = false;
 bool arpLatch = false;
@@ -806,6 +827,7 @@ const ui_param param_SeqSTEP = {
 	uiDrawValueInt1,
 	[](int* valPtr, int newVal, int amt)->void {
 		selectedStep = CLAMP(newVal, 0, PatternLength(viewingPattern)-1);
+		patternPage[viewingPattern] = getPatternPage(selectedStep);
 	},
 	NULL,
 	[]()->int {
@@ -1331,14 +1353,27 @@ void drawPatternLEDs(int patternNum) {
 	auto pagestepstart = (currentpage * NUM_STEPKEYS);
 
 	if (seqStepHold && *param == 1) {
-        // show the scale for reference
-		for(int j = 1; j < 27; j++){
-			if(STEP(j) == selectedStep) {
-				int note = stepNoteP[viewingPattern][selectedStep].note;
-				strip.setPixelColor(j, strip.gamma32(strip.ColorHSV((65535 / 12) * ((note - scaleRoot) % 12), rainbowSaturation, 255)));
-			} else {
-				strip.setPixelColor(j, getDefaultColor(j));
+		if(showScaleInSeq) {
+			// show the scale for reference
+			for(int j = 1; j < 27; j++){
+				if(KEY_TO_STEP(j) == selectedStep) {
+					int note = stepNoteP[viewingPattern][KEY_TO_STEP(j)].note;
+					strip.setPixelColor(j, strip.gamma32(strip.ColorHSV((65535 / 12) * ((note - scaleRoot) % 12), rainbowSaturation, 255)));
+				} else {
+					strip.setPixelColor(j, getDefaultColor(j));
+				}
 			}
+		} else {
+			// show notes for trig steps
+			for(int j = 11; j < 27; j++){
+				if(stepNoteP[viewingPattern][KEY_TO_STEP(j)].trig == TRIGTYPE_PLAY) {
+					int note = stepNoteP[viewingPattern][KEY_TO_STEP(j)].note;
+					strip.setPixelColor(j, strip.gamma32(strip.ColorHSV((65535 / 12) * ((note - scaleRoot) % 12), rainbowSaturation, 255)));
+				} else {
+					strip.setPixelColor(j, LEDOFF);
+				}
+			}
+
 		}
 	} else if (stepRecord) {
 	
@@ -1396,10 +1431,12 @@ void drawPatternLEDs(int patternNum) {
 		strip.setPixelColor(12, RBLUE);
 		strip.setPixelColor(25, RBLUE);
 		strip.setPixelColor(26, ORANGE);
+		// mute / cue
+		strip.setPixelColor(11 + 8, patternSettings[viewingPattern].mute ? DKDKRED : RED);
 		// restart
 		strip.setPixelColor(11 + 9, CYAN);
 		// reverse
-		strip.setPixelColor(11 + 10, MAGENTA);
+		strip.setPixelColor(11 + 10, patternSettings[viewingPattern].reverse ? MAGENTA : DKDKMAGENTA);
 		// toggle FX
 		strip.setPixelColor(11 + 11, YELLOW);
 		// toggle plock
@@ -1408,13 +1445,13 @@ void drawPatternLEDs(int patternNum) {
 		// show pattern
 		for(int j = 3; j < 11; j++){
 			if (j == viewingPattern+3){  			// PATTERN SELECT
-				if(playing && PATTERN(j) == playingPattern) {
+				if(omxMode == MODE_S1 && playing && KEY_TO_PATTERN(j) == playingPattern) {
 					strip.setPixelColor(j, blinkState ? SEQCHASE : stepColor);
 				} else {
 					strip.setPixelColor(j, stepColor);
 				}
-			} else if(playing && PATTERN(j) == playingPattern) {
-				strip.setPixelColor(j, blinkState ? SEQCHASE : seqColors[PATTERN(j)]);
+			} else if(omxMode == MODE_S1 && playing && KEY_TO_PATTERN(j) == playingPattern) {
+				strip.setPixelColor(j, blinkState ? SEQCHASE : seqColors[KEY_TO_PATTERN(j)]);
 			} else {
 				strip.setPixelColor(j, LEDOFF);
 			}
@@ -1438,13 +1475,13 @@ void drawPatternLEDs(int patternNum) {
 					}
 
 				} else if (j == viewingPattern+3){  			// PATTERN SELECT
-					if(playing && PATTERN(j) == playingPattern) {
+					if(playing && KEY_TO_PATTERN(j) == playingPattern) {
 						strip.setPixelColor(j, blinkState ? SEQCHASE : stepColor);
 					} else {
 						strip.setPixelColor(j, stepColor);
 					}
-				} else if(playing && PATTERN(j) == playingPattern) {
-					strip.setPixelColor(j, blinkState ? SEQCHASE : seqColors[PATTERN(j)]);
+				} else if(playing && KEY_TO_PATTERN(j) == playingPattern) {
+					strip.setPixelColor(j, blinkState ? SEQCHASE : seqColors[KEY_TO_PATTERN(j)]);
 				} else {
 					strip.setPixelColor(j, LEDOFF);
 				}
@@ -1864,22 +1901,40 @@ bool handleKeyEventSeq(keypadEvent e) {
 				snprintf(messageText, MESSAGE_TEXT_LEN, "COPY");
 				setMessage(500);
 			} else if(F2_HELD) {
-				snprintf(messageText, MESSAGE_TEXT_LEN, "PASTE");
+				if(AUX_HELD) {
+					snprintf(messageText, MESSAGE_TEXT_LEN, "MUTE");
+				} else {
+					snprintf(messageText, MESSAGE_TEXT_LEN, "PASTE");
+				}
 				setMessage(500);
 			}
+			dangerConfirm = false;
 		}
 		if(down && ((thisKey == 1 && F2_HELD) || (thisKey == 2 && F1_HELD))) {
-			snprintf(messageText, MESSAGE_TEXT_LEN, "CLEAR");
+			snprintf(messageText, MESSAGE_TEXT_LEN, "CUT");
 			setMessage(500);
+			dangerConfirm = false;
 		} else if(down && thisKey == 1) {
 			snprintf(messageText, MESSAGE_TEXT_LEN, "COPY");
 			setMessage(500);
+			dangerConfirm = false;
 		} else if(down && thisKey == 2) {
-			snprintf(messageText, MESSAGE_TEXT_LEN, "PASTE");
+			if(AUX_HELD) {
+				snprintf(messageText, MESSAGE_TEXT_LEN, "MUTE");
+			} else {
+				snprintf(messageText, MESSAGE_TEXT_LEN, "PASTE");
+			}
 			setMessage(500);
+			dangerConfirm = false;
 		}
 	}
 	if (seqStepHold) {
+		if(down && thisKey == 0) {
+			showScaleInSeq = !showScaleInSeq;
+			invalidateShortPress[0] = true;
+			dirtyPixels = true;
+			return true;
+		}
 		if(down && thisKey > 3) {
 			// while holding down sequence step, you can press a keyboard key to enter that note for that step
 			// you can enter the note under the current step by holding any other note, releasing the step and then pressing the step again
@@ -1902,6 +1957,7 @@ bool handleKeyEventSeq(keypadEvent e) {
 		// STEP RECORD
 		selectedNote = thisKey;
 		selectedStep = seqPos[viewingPattern];
+		patternPage[viewingPattern] = getPatternPage(selectedStep);
 
 		int adjnote = notes[thisKey] + (octave * 12);
 		stepNoteP[viewingPattern][selectedStep].note = adjnote;
@@ -1932,12 +1988,16 @@ bool handleKeyEventSeq(keypadEvent e) {
 		} else if(down && IS_PATTERN(thisKey)) {
 			if(auxShift && F1_HELD == false && F2_HELD == false && IS_PATTERN(thisKey)) {
 				if(playing) {
-					// cue next pattern
-					nextPlayingPattern = thisKey-3;
-					seqPos[nextPlayingPattern] = 0;
-
-					snprintf(messageText, MESSAGE_TEXT_LEN, "CUE P%d", nextPlayingPattern+1);
-					setMessage(500);
+					if(omxMode == MODE_S1) {
+						// cue next pattern
+						nextPlayingPattern = thisKey-3;
+						seqPos[nextPlayingPattern] = 0;
+						snprintf(messageText, MESSAGE_TEXT_LEN, "CUE P%d", nextPlayingPattern+1);
+						setMessage(500);
+					} else {
+						// toggle mute for pattern
+						patternSettings[KEY_TO_PATTERN(thisKey)].mute = !patternSettings[KEY_TO_PATTERN(thisKey)].mute;
+					}
 				} else {
 					// step record
 					viewingPattern = thisKey-3;
@@ -1949,30 +2009,33 @@ bool handleKeyEventSeq(keypadEvent e) {
 				}
 				return true;
 			} else if (F1_HELD && F2_HELD) {
-				clearPattern(PATTERN(thisKey));
-				snprintf(messageText, MESSAGE_TEXT_LEN, "cleared P%d", PATTERN(thisKey)+1);
-				setMessage(1000);
+				DANGER_CONFIRM(thisKey, "CONFIRM CUT?", {
+					copyPattern(KEY_TO_PATTERN(thisKey));
+					clearPattern(KEY_TO_PATTERN(thisKey));
+					snprintf(messageText, MESSAGE_TEXT_LEN, "CUT P%d", KEY_TO_PATTERN(thisKey)+1);
+					setMessage(500);
+					dangerConfirm = false;
+				});
 			} else if(F1_HELD) {
 				// copy pattern
-				copyPattern(PATTERN(thisKey));
-				snprintf(messageText, MESSAGE_TEXT_LEN, "copied P%d", PATTERN(thisKey)+1);
+				copyPattern(KEY_TO_PATTERN(thisKey));
+				snprintf(messageText, MESSAGE_TEXT_LEN, "COPIED P%d", KEY_TO_PATTERN(thisKey)+1);
 				setMessage(1000);
 			} else if(F2_HELD) {
-				if(auxShift) {
-					// toggle mute
-					patternSettings[PATTERN(thisKey)].mute = !patternSettings[PATTERN(thisKey)].mute;
-				} else {
-					// paste pattern
-					pastePattern(PATTERN(thisKey));
-					snprintf(messageText, MESSAGE_TEXT_LEN, "pasted to P%d", PATTERN(thisKey)+1);
+				// paste pattern
+				DANGER_CONFIRM(thisKey, "CONFIRM PASTE?", {
+					pastePattern(KEY_TO_PATTERN(thisKey));
+					snprintf(messageText, MESSAGE_TEXT_LEN, "PASTED P%d", KEY_TO_PATTERN(thisKey)+1);
 					setMessage(500);
-				}
+					dangerConfirm = false;
+				});
 			} else {
 				// switch pattern
 				int prevPattern = viewingPattern;
-				viewingPattern = PATTERN(thisKey);
+				viewingPattern = KEY_TO_PATTERN(thisKey);
 				if(viewingPattern != prevPattern) {
 					selectedStep = 0;
+					patternPage[viewingPattern] = getPatternPage(selectedStep);
 					if(!playing) {
 						seqPos[viewingPattern] = 0;
 					}
@@ -1998,47 +2061,64 @@ bool handleKeyEventSeq(keypadEvent e) {
 		} else if(down && IS_STEP(thisKey)) {
 			// SEQUENCE 1-16 STEP KEYS
 			if (patternEdit) { // WHILE HOLDING PATTERN
-				if(F1_HELD && F2_HELD) { // clear page
-					if(clearedPage == PAGE(thisKey) && clearedPageTimer > 0) {
-						// using twice will remove page
-						int newPage = PAGE(thisKey)-1;
-						SetPatternLength(viewingPattern, (newPage+1) * NUM_STEPKEYS);
-						clearedPage = -1;
-						clearedPageTimer = 0;
-						snprintf(messageText, MESSAGE_TEXT_LEN, "removed page %d", PAGE(thisKey)+1);
-						if(selectedStep > PatternLength(viewingPattern)) {
-							selectedStep = CLAMP(selectedStep, 0, PatternLength(viewingPattern)-1);
+				if(F1_HELD && F2_HELD) { // cut page
+					if(KEY_TO_PAGE(thisKey) >= 0 && KEY_TO_PAGE(thisKey) < 4) {
+						if(clearedPage == KEY_TO_PAGE(thisKey) && clearedPageTimer > 0) {
+							// using three times will remove page
+							int newPage = KEY_TO_PAGE(thisKey)-1;
+							SetPatternLength(viewingPattern, (newPage+1) * NUM_STEPKEYS);
+							clearedPage = -1;
+							clearedPageTimer = 0;
+							snprintf(messageText, MESSAGE_TEXT_LEN, "REM PAGE %d", KEY_TO_PAGE(thisKey)+1);
+							if(selectedStep > PatternLength(viewingPattern)) {
+								selectedStep = CLAMP(selectedStep, 0, PatternLength(viewingPattern)-1);
+								patternPage[viewingPattern] = getPatternPage(selectedStep);
+							}
+							setMessage(500);
+						} else {
+							DANGER_CONFIRM(thisKey, "CONFIRM CUT?", {
+								copyPage(viewingPattern, KEY_TO_PAGE(thisKey));
+								clearPage(viewingPattern, KEY_TO_PAGE(thisKey));
+								snprintf(messageText, MESSAGE_TEXT_LEN, "CUT PAGE %d", KEY_TO_PAGE(thisKey)+1);
+								setMessage(500);
+
+								clearedPage = KEY_TO_PAGE(thisKey);
+								clearedPageTimer = shortPressInterval;
+								dangerConfirm = false;
+							});
 						}
-						setMessage(500);
-					} else {
-						clearPage(viewingPattern, PAGE(thisKey));
-						snprintf(messageText, MESSAGE_TEXT_LEN, "cleared page %d", PAGE(thisKey)+1);
-						setMessage(500);
-
-						clearedPage = PAGE(thisKey);
-						clearedPageTimer = shortPressInterval;
 					}
-
 				} else if(F1_HELD) { // copy page
-					copyPage(viewingPattern, PAGE(thisKey));
-					snprintf(messageText, MESSAGE_TEXT_LEN, "copied page %d", PAGE(thisKey)+1);
-					setMessage(500);
+					if(KEY_TO_PAGE(thisKey) >= 0 && KEY_TO_PAGE(thisKey) < 4) {
+						copyPage(viewingPattern, KEY_TO_PAGE(thisKey));
+						snprintf(messageText, MESSAGE_TEXT_LEN, "COPIED PAGE %d", KEY_TO_PAGE(thisKey)+1);
+						setMessage(500);
+					}
 				} else if(F2_HELD) { // paste page
-					pastePage(viewingPattern, PAGE(thisKey));
-					snprintf(messageText, MESSAGE_TEXT_LEN, "pasted page %d", PAGE(thisKey)+1);
-					setMessage(500);
+					if(KEY_TO_PAGE(thisKey) >= 0 && KEY_TO_PAGE(thisKey) < 4) {
+						DANGER_CONFIRM(thisKey, "CONFIRM PASTE?", {
+							pastePage(viewingPattern, KEY_TO_PAGE(thisKey));
+							snprintf(messageText, MESSAGE_TEXT_LEN, "PASTED PAGE %d", KEY_TO_PAGE(thisKey)+1);
+							setMessage(500);
+							dangerConfirm = false;
+							// TODO: extend pattern to fit
+						});
+					}
 				} else {
-					if(PAGE(thisKey) >= 0 && PAGE(thisKey) <= 4) {
+					if(KEY_TO_PAGE(thisKey) >= 0 && KEY_TO_PAGE(thisKey) < 4) {
 						// select pattern page
 						int lastPage = patternPage[viewingPattern];
-						int newPage = PAGE(thisKey);
+						int newPage = KEY_TO_PAGE(thisKey);
 						if(newPage >= PatternPages(viewingPattern)) {
-							// extend pattern
-							SetPatternLength(viewingPattern, (newPage+1) * NUM_STEPKEYS);
-							dirtyDisplay = true;
-							dirtyPixels = true;
-							snprintf(messageText, MESSAGE_TEXT_LEN, "P%d len: %d", viewingPattern, PatternLength(viewingPattern));
-							setMessage(500);
+							DANGER_CONFIRM(thisKey, "CONFIRM EXTEND?", {
+								// extend pattern
+								SetPatternLength(viewingPattern, (newPage+1) * NUM_STEPKEYS);
+								dirtyDisplay = true;
+								dirtyPixels = true;
+								dangerConfirm = 0;
+								snprintf(messageText, MESSAGE_TEXT_LEN, "P%d len: %d", viewingPattern, PatternLength(viewingPattern));
+								setMessage(500);
+							});
 						}
 						patternPage[viewingPattern] = CLAMP(newPage, 0, PatternPages(viewingPattern)-1);
 						if(patternPage[viewingPattern] != lastPage) {
@@ -2051,24 +2131,28 @@ bool handleKeyEventSeq(keypadEvent e) {
 							if(!playing) {
 								seqPos[viewingPattern] = selectedStep;
 							}
+							patternPage[viewingPattern] = getPatternPage(selectedStep);
 							dirtyPixels = true;
 							dirtyDisplay = true;
 						}
-					} else if(STEP(thisKey) == 0 || STEP(thisKey) == 15) {
+					} else if(KEY_TO_STEP(thisKey) == 0 || KEY_TO_STEP(thisKey) == 15) {
 						// transpose pattern by octaves
-						int transpose = STEP(thisKey) == 0 ? -12 : 12;
+						int transpose = KEY_TO_STEP(thisKey) == 0 ? -12 : 12;
 						transposeSeq(viewingPattern, transpose);
 						dirtyDisplay = true;
-					} else if(STEP(thisKey) == 1 || STEP(thisKey) == 14) {
+					} else if(KEY_TO_STEP(thisKey) == 1 || KEY_TO_STEP(thisKey) == 14) {
 						// transpose pattern by half-step
-						int transpose = STEP(thisKey) == 1 ? -1 : 1;
+						int transpose = KEY_TO_STEP(thisKey) == 1 ? -1 : 1;
 						transposeSeq(viewingPattern, transpose);
 						dirtyDisplay = true;
-					} else if(STEP(thisKey) == 9) {
+					} else if(KEY_TO_STEP(thisKey) == 8) {
+						// toggle mute for pattern
+						patternSettings[viewingPattern].mute = !patternSettings[viewingPattern].mute;
+					} else if(KEY_TO_STEP(thisKey) == 9) {
 						// reset to start
 						seqPos[viewingPattern] = 0;
 						dirtyDisplay = true;
-					} else if(STEP(thisKey) == 10) {
+					} else if(KEY_TO_STEP(thisKey) == 10) {
 						// reverse
 						patternSettings[viewingPattern].reverse = !patternSettings[viewingPattern].reverse;
 						dirtyDisplay = true;
@@ -2076,16 +2160,19 @@ bool handleKeyEventSeq(keypadEvent e) {
 				}
 			} else if (F1_HELD && F2_HELD) {
 				// clear step
-				clearStep(viewingPattern, STEP(thisKey));
+				copyStep(viewingPattern, seqKey);
+				clearStep(viewingPattern, seqKey);
+				snprintf(messageText, MESSAGE_TEXT_LEN, "CUT S%d", seqKey);
+				setMessage(500);
 			} else if (F1_HELD) {
 				// copy step
 				copyStep(viewingPattern, seqKey);
-				snprintf(messageText, MESSAGE_TEXT_LEN, "copied S%d", seqKey);
+				snprintf(messageText, MESSAGE_TEXT_LEN, "COPIED S%d", seqKey);
 				setMessage(500);
 			} else if (F2_HELD) {
 				// paste step
 				pasteStep(viewingPattern, seqKey);
-				snprintf(messageText, MESSAGE_TEXT_LEN, "pasted S%d", seqKey);
+				snprintf(messageText, MESSAGE_TEXT_LEN, "PASTED S%d", seqKey);
 				setMessage(500);
 			} else if (AUX_HELD) {
 			} else {
@@ -2246,6 +2333,12 @@ void loop() {
 	}
 	if(clearedPageTimer > 0) {
 		clearedPageTimer--;
+	}
+	if(dangerConfirmTimeout > 0) {
+		dangerConfirmTimeout--;
+		if(dangerConfirmTimeout <= 0) {
+			dangerConfirm = -1;
+		}
 	}
 
 	switch(omxMode) {

@@ -41,6 +41,8 @@ const auto DKMAGENTA = 0x4D004C;
 const auto INDIGO = 0x4B0082;
 
 const auto DKDKPURPLE = 0x040008;
+const auto DKDKRED = 0x080000;
+const auto DKDKMAGENTA = 0x100010;
 
 // hsl(xxx, 50%, 75%)
 const auto LBLUE = 0x9FCFDF;
