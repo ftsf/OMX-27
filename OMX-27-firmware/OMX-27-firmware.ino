@@ -1939,7 +1939,7 @@ bool handleKeyEventSeq(keypadEvent e) {
 			dirtyPixels = true;
 			return true;
 		}
-		if(down && thisKey > 3) {
+		if(down && thisKey > 0) {
 			// while holding down sequence step, you can press a keyboard key to enter that note for that step
 			// you can enter the note under the current step by holding any other note, releasing the step and then pressing the step again
 			int adjnote = notes[thisKey] + (octave * 12);
