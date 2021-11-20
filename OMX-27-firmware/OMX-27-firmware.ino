@@ -1432,15 +1432,19 @@ void drawPatternLEDs(int patternNum) {
 		strip.setPixelColor(25, RBLUE);
 		strip.setPixelColor(26, ORANGE);
 		// mute / cue
-		strip.setPixelColor(11 + 8, patternSettings[viewingPattern].mute ? DKDKRED : RED);
+		if(omxMode == MODE_S1) {
+			strip.setPixelColor(11 + 8, (playingPattern == viewingPattern || (nextPlayingPattern == viewingPattern && blinkState)) ? GREEN : DKDKGREEN);
+		} else {
+			strip.setPixelColor(11 + 8, patternSettings[viewingPattern].mute ? DKDKRED : RED);
+		}
 		// restart
 		strip.setPixelColor(11 + 9, CYAN);
 		// reverse
 		strip.setPixelColor(11 + 10, patternSettings[viewingPattern].reverse ? MAGENTA : DKDKMAGENTA);
 		// toggle FX
-		strip.setPixelColor(11 + 11, YELLOW);
+		strip.setPixelColor(11 + 11, disableFX[viewingPattern] ? DKDKYELLOW : YELLOW);
 		// toggle plock
-		strip.setPixelColor(11 + 12, MINT);
+		strip.setPixelColor(11 + 12, disablePLock[viewingPattern] ? DKDKBLUE : BLUE);
 
 		// show pattern
 		for(int j = 3; j < 11; j++){
@@ -1994,9 +1998,11 @@ bool handleKeyEventSeq(keypadEvent e) {
 						seqPos[nextPlayingPattern] = 0;
 						snprintf(messageText, MESSAGE_TEXT_LEN, "CUE P%d", nextPlayingPattern+1);
 						setMessage(500);
+						invalidateShortPress[0] = true;
 					} else {
 						// toggle mute for pattern
 						patternSettings[KEY_TO_PATTERN(thisKey)].mute = !patternSettings[KEY_TO_PATTERN(thisKey)].mute;
+						invalidateShortPress[0] = true;
 					}
 				} else {
 					// step record
@@ -2006,6 +2012,7 @@ bool handleKeyEventSeq(keypadEvent e) {
 					dirtyDisplay = true;
 					snprintf(messageText, MESSAGE_TEXT_LEN, "STEP RECORD");
 					setMessage(500);
+					invalidateShortPress[0] = true;
 				}
 				return true;
 			} else if (F1_HELD && F2_HELD) {
@@ -2165,6 +2172,10 @@ bool handleKeyEventSeq(keypadEvent e) {
 						// reverse
 						patternSettings[viewingPattern].reverse = !patternSettings[viewingPattern].reverse;
 						dirtyDisplay = true;
+					} else if(KEY_TO_STEP(thisKey) == 11) {
+						disableFX[viewingPattern] = !disableFX[viewingPattern];
+					} else if(KEY_TO_STEP(thisKey) == 12) {
+						disablePLock[viewingPattern] = !disablePLock[viewingPattern];
 					}
 				}
 			} else if (F1_HELD && F2_HELD) {
@@ -3120,55 +3131,57 @@ void playNote(int patternNum) {
 	}
 	StepType playStepType = stepNoteP[patternNum][seqPos[patternNum]].stepType;
 
-	if (stepNoteP[patternNum][seqPos[patternNum]].stepType == STEPTYPE_RAND){
-		auto tempType = random(STEPTYPE_COUNT);
+	if(disableFX[patternNum] == false) {
+		if (stepNoteP[patternNum][seqPos[patternNum]].stepType == STEPTYPE_RAND){
+			auto tempType = random(STEPTYPE_COUNT);
 
-		// this is fucking hacky to increment the enum for stepType
-		switch(tempType){
-			case 0:
-				playStepType = STEPTYPE_NONE;
-				break;
-			case 1:
-				playStepType = STEPTYPE_RESTART;
-				break;
-			case 2:
-				playStepType = STEPTYPE_FWD;
-				break;
-			case 3:
-				playStepType = STEPTYPE_REV;
-				break;
-			case 4:
-				playStepType = STEPTYPE_PONG;
-				break;
-			case 5:
-				playStepType = STEPTYPE_RANDSTEP;
-				break;
+			// this is fucking hacky to increment the enum for stepType
+			switch(tempType){
+				case 0:
+					playStepType = STEPTYPE_NONE;
+					break;
+				case 1:
+					playStepType = STEPTYPE_RESTART;
+					break;
+				case 2:
+					playStepType = STEPTYPE_FWD;
+					break;
+				case 3:
+					playStepType = STEPTYPE_REV;
+					break;
+				case 4:
+					playStepType = STEPTYPE_PONG;
+					break;
+				case 5:
+					playStepType = STEPTYPE_RANDSTEP;
+					break;
+			}
+	//		Serial.println(playStepType);
 		}
-//		Serial.println(playStepType);
-	}
 
-	switch (playStepType) {
-		case STEPTYPE_COUNT:	// fall through
-		case STEPTYPE_RAND:
+		switch (playStepType) {
+			case STEPTYPE_COUNT:	// fall through
+			case STEPTYPE_RAND:
+				break;
+			case STEPTYPE_NONE:
+				break;
+			case STEPTYPE_FWD:
+				patternSettings[patternNum].reverse = 0;
+				break;
+			case STEPTYPE_REV:
+				patternSettings[patternNum].reverse = 1;
+				break;
+			case STEPTYPE_PONG:
+				patternSettings[patternNum].reverse = !patternSettings[patternNum].reverse;
+				break;
+			case STEPTYPE_RANDSTEP:
+				seqPos[patternNum] = (rand() % PatternLength(patternNum)) + 1;
+				break;
+			case STEPTYPE_RESTART:
+				seqPos[patternNum] = 0;
+				break;
 			break;
-		case STEPTYPE_NONE:
-			break;
-		case STEPTYPE_FWD:
-			patternSettings[patternNum].reverse = 0;
-			break;
-		case STEPTYPE_REV:
-			patternSettings[patternNum].reverse = 1;
-			break;
-		case STEPTYPE_PONG:
-			patternSettings[patternNum].reverse = !patternSettings[patternNum].reverse;
-			break;
-		case STEPTYPE_RANDSTEP:
-			seqPos[patternNum] = (rand() % PatternLength(patternNum)) + 1;
-			break;
-		case STEPTYPE_RESTART:
-			seqPos[patternNum] = 0;
-			break;
-		break;
+		}
 	}
 
 	// regular note on trigger
@@ -3202,15 +3215,17 @@ void playNote(int patternNum) {
 
 		// {notenum, vel, notelen, step_type, {p1,p2,p3,p4}, prob}
 		// send param locks
-		for (int q=0; q<4; q++){
-			int tempCC = stepNoteP[patternNum][seqPos[patternNum]].params[q];
-			if (tempCC > -1) {
-				MM::sendControlChange(pots[potbank][q],tempCC,PatternChannel(patternNum));
-				prevPlock[q] = tempCC;
-			} else if (prevPlock[q] != potValues[q]) {
-				//if (tempCC != prevPlock[q]) {
-				MM::sendControlChange(pots[potbank][q],potValues[q],PatternChannel(patternNum));
-				prevPlock[q] = potValues[q];
+		if(disablePLock[patternNum] == false) {
+			for (int q=0; q<4; q++){
+				int tempCC = stepNoteP[patternNum][seqPos[patternNum]].params[q];
+				if (tempCC > -1) {
+					MM::sendControlChange(pots[potbank][q],tempCC,PatternChannel(patternNum));
+					prevPlock[q] = tempCC;
+				} else if (prevPlock[q] != potValues[q]) {
+					//if (tempCC != prevPlock[q]) {
+					MM::sendControlChange(pots[potbank][q],potValues[q],PatternChannel(patternNum));
+					prevPlock[q] = potValues[q];
+				}
 			}
 		}
 		lastNote[patternNum][seqPos[patternNum]] = stepNoteP[patternNum][seqPos[patternNum]].note;
