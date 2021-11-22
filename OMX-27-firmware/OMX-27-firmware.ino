@@ -1888,26 +1888,25 @@ bool handleKeyEventCommon(keypadEvent e) {
 			invalidateShortPress[0] = true;
 			return true;
 		}
+		// new press on AUX
 		invalidateShortPress[0] = false;
 		dirtyDisplay = true;
 		return false;
 	} else if (e.bit.EVENT == KEY_JUST_RELEASED && thisKey == 0) {
-		if(AUX_HELD) {
-			invalidateShortPress[0] = false;
-			dirtyDisplay = true;
+		dirtyDisplay = true;
 
-			strip.setPixelColor(0, LEDOFF);
-			strip.setPixelColor(1, getDefaultColor(1));
-			strip.setPixelColor(2, getDefaultColor(2));
-			strip.setPixelColor(3, getDefaultColor(3));
-			strip.setPixelColor(4, getDefaultColor(4));
-			strip.setPixelColor(11, getDefaultColor(11));
-			strip.setPixelColor(12, getDefaultColor(12));
+		strip.setPixelColor(0, LEDOFF);
+		strip.setPixelColor(1, getDefaultColor(1));
+		strip.setPixelColor(2, getDefaultColor(2));
+		strip.setPixelColor(3, getDefaultColor(3));
+		strip.setPixelColor(4, getDefaultColor(4));
+		strip.setPixelColor(11, getDefaultColor(11));
+		strip.setPixelColor(12, getDefaultColor(12));
 
-			return false;
-		}
+		return false;
 	}
 	if (e.bit.EVENT == KEY_JUST_PRESSED && thisKey != 0) {
+		// pressing any other key invalidates short press on AUX
 		invalidateShortPress[0] = true;
 	}
 	// common controls for editing
@@ -2032,10 +2031,10 @@ bool handleKeyEventSeq(keypadEvent e) {
 			seqStepNoteSelect = false;
 			invalidateShortPress[0] = true;
 			invalidateShortPress[thisKey] = true;
+			MESSAGE("CANCELED");
 			dirtyPixels = true;
-			setMessage(0);
 			return true;
-		} else if(down && thisKey > 0) {
+		} else if(down) {
 			// enter note value and exit mode
 			int note = notes[thisKey] + (octave * 12);
 			stepNoteP[viewingPattern][selectedStep].note = note;
