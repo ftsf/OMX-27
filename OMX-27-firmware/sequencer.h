@@ -58,6 +58,8 @@ struct PatternSettings {  // ?? bytes
   uint8_t clockDivMultP : 4;
   uint8_t autoresetprob : 7; // probability of autoreset - 1 is always and totally random if autoreset is 0
   uint8_t swing : 7;
+  uint8_t prob : 7; // probability any step playing
+  uint8_t vel : 7; // velocity multiplier
   bool reverse : 1;
   bool mute : 1;
   bool autoreset : 1; // whether autoreset is enabled
@@ -65,14 +67,14 @@ struct PatternSettings {  // ?? bytes
 }; // ? bytes
 
 PatternSettings patternSettings[NUM_PATTERNS] = {
-  { 15, 0, 0, 0, 0, 0, 1, 3, 1, 0, false, false, false, false },
-  { 15, 1, 0, 0, 0, 0, 1, 3, 1, 0, false, false, false, false },
-  { 15, 2, 0, 0, 0, 0, 1, 3, 1, 0, false, false, false, false },
-  { 15, 3, 0, 0, 0, 0, 1, 3, 1, 0, false, false, false, false },
-  { 15, 4, 0, 0, 0, 0, 1, 3, 1, 0, false, false, false, false },
-  { 15, 5, 0, 0, 0, 0, 1, 3, 1, 0, false, false, false, false },
-  { 15, 6, 0, 0, 0, 0, 1, 3, 1, 0, false, false, false, false },
-  { 15, 7, 0, 0, 0, 0, 1, 3, 1, 0, false, false, false, false }
+  { 15, 0, 0, 0, 0, 0, 1, 2, 1, 0, 100, 127, false, false, false, false },
+  { 15, 1, 0, 0, 0, 0, 1, 2, 1, 0, 100, 127, false, false, false, false },
+  { 15, 2, 0, 0, 0, 0, 1, 2, 1, 0, 100, 127, false, false, false, false },
+  { 15, 3, 0, 0, 0, 0, 1, 2, 1, 0, 100, 127, false, false, false, false },
+  { 15, 4, 0, 0, 0, 0, 1, 2, 1, 0, 100, 127, false, false, false, false },
+  { 15, 5, 0, 0, 0, 0, 1, 2, 1, 0, 100, 127, false, false, false, false },
+  { 15, 6, 0, 0, 0, 0, 1, 2, 1, 0, 100, 127, false, false, false, false },
+  { 15, 7, 0, 0, 0, 0, 1, 2, 1, 0, 100, 127, false, false, false, false }
 };
 
 struct TimePerPattern {
@@ -127,6 +129,10 @@ StepNote stepNoteP[NUM_PATTERNS][NUM_STEPS];
 
 uint8_t lastNote[NUM_PATTERNS][NUM_STEPS] = {
 	{0},{0},{0},{0},{0},{0},{0},{0}
+};
+
+uint8_t patternActive[NUM_PATTERNS] = {
+	0,0,0,0,0,0,0,0
 };
 
 StepNote copyStepBuffer = {0, 0, 0, TRIGTYPE_MUTE, { -1, -1, -1, -1, -1}, 100, 0, STEPTYPE_NONE };
@@ -195,3 +201,4 @@ int trigConditionsAB[36][2] ={
 
 bool disablePLock[NUM_PATTERNS] = {0, 0, 0, 0, 0, 0, 0, 0};
 bool disableFX[NUM_PATTERNS] = {0, 0, 0, 0, 0, 0, 0, 0};
+bool pageLock[NUM_PATTERNS] = {0, 0, 0, 0, 0, 0, 0, 0};

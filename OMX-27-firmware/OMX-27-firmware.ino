@@ -256,6 +256,8 @@ int clearedPage = -1;
 
 const auto uiDrawTextY = 20;
 
+char uiValueBuffer[5];
+
 void uiDrawValueNone(int value, int x) {
 	u8g2centerText("   ", x*32, hline*2+3, 32, 20);
 }
@@ -265,6 +267,17 @@ void uiDrawValueInt(int value, int x) {
 		u8g2centerText("---", x*32, hline*2+3, 32, uiDrawTextY);
 	} else {
 		u8g2centerNumber(value, x*32, hline*2+3, 32, uiDrawTextY);
+	}
+}
+
+void uiDrawValueProb(int value, int x) {
+	if(value == -127) {
+		u8g2centerText("---", x*32, hline*2+3, 32, uiDrawTextY);
+	} else if(value > 100) {
+		u8g2centerText("ON", x*32, hline*2+3, 32, uiDrawTextY);
+	} else {
+        snprintf(uiValueBuffer, 5, "%d%%", value);
+		u8g2centerText(uiValueBuffer, x*32, hline*2+3, 32, uiDrawTextY);
 	}
 }
 
@@ -749,6 +762,7 @@ const ui_param seq_pattern_params[] = {
 			return (int)patternSettings[viewingPattern].swing;
 		}
 	},
+
 	param_BPM,
 	{
 		"SOLO",
@@ -811,6 +825,7 @@ const ui_param seq_pattern_params[] = {
 		1,
 		uiDrawValueBool,
 	},
+
 	{
 		"ROT",
 		&rotationAmt,
@@ -838,7 +853,38 @@ const ui_param seq_pattern_params[] = {
 		}
 	},
 	{
-		"START",
+		"PROB",
+		NULL,
+		false,
+		0,
+		100,
+		uiDrawValueProb,
+		[](int* valPtr, int newVal, int amt)->void {
+			patternSettings[viewingPattern].prob = newVal;
+		},
+		NULL,
+		[]()->int {
+			return (int)patternSettings[viewingPattern].prob;
+		}
+	},
+
+	{
+		"VEL",
+		NULL,
+		false,
+		0,
+		127,
+		uiDrawValuePercent,
+		[](int* valPtr, int newVal, int amt)->void {
+			patternSettings[viewingPattern].vel = newVal;
+		},
+		NULL,
+		[]()->int {
+			return (int)patternSettings[viewingPattern].vel;
+		}
+	},
+	{
+		"RS.START",
 		NULL,
 		false,
 		0,
@@ -853,7 +899,7 @@ const ui_param seq_pattern_params[] = {
 		}
 	},
 	{
-		"END",
+		"RS.END",
 		NULL,
 		false,
 		0,
@@ -868,7 +914,7 @@ const ui_param seq_pattern_params[] = {
 		}
 	},
 	{
-		"FREQ",
+		"RS.FREQ",
 		NULL,
 		false,
 		0,
@@ -883,12 +929,12 @@ const ui_param seq_pattern_params[] = {
 		}
 	},
 	{
-		"PROB",
+		"RS.PROB",
 		NULL,
 		false,
 		0,
 		100,
-		uiDrawValueInt,
+		uiDrawValueProb,
 		[](int* valPtr, int newVal, int amt)->void {
 			patternSettings[viewingPattern].autoresetprob = newVal;
 		},
@@ -959,7 +1005,6 @@ const ui_param param_SeqSTEP = {
 	uiDrawValueInt1,
 	[](int* valPtr, int newVal, int amt)->void {
 		selectedStep = CLAMP(newVal, 0, PatternLength(viewingPattern)-1);
-		patternPage[viewingPattern] = getPatternPage(selectedStep);
 	},
 	NULL,
 	[]()->int {
@@ -995,8 +1040,8 @@ const ui_param seq_note_select_params[] = {
 		NULL,
 		false,
 		0,
-		127,
-		uiDrawValueInt,
+		101,
+		uiDrawValueProb,
 		[](int* valPtr, int newVal, int amt)->void {
 			stepNoteP[viewingPattern][selectedStep].prob = newVal;
 		},
@@ -1441,7 +1486,7 @@ void midi_leds() {
 // ####### SEQUENCER LEDS #######
 
 void drawPatternSteps(int pattern) {
-	auto currentpage = patternPage[pattern];
+	auto currentpage = getPatternPage(selectedStep);
 	auto pagestepstart = (currentpage * NUM_STEPKEYS);
 
 	auto trigColor = patternSettings[pattern].mute ? muteColors[pattern] : seqColors[pattern];
@@ -1498,7 +1543,19 @@ void drawPatternTweaks(int pattern) {
 	for(int j = 11; j < 27; j++){
 		strip.setPixelColor(j, LEDOFF);
 	}
-	// DRAW THE LEDS FOR THE PAGES, HIGHLIGHT VIEWING AND PLAYING
+	// transpose keys
+	strip.setPixelColor(11, ORANGE);
+	strip.setPixelColor(12, RBLUE);
+	strip.setPixelColor(25, RBLUE);
+	strip.setPixelColor(26, ORANGE);
+
+	// solo
+	strip.setPixelColor(11 + 2, soloPattern == pattern ? MAGENTA : DKMAGENTA);
+
+	// page lock
+	strip.setPixelColor(11 + 3, pageLock[pattern] ? GREEN : DKDKGREEN);
+
+	// draw the leds for the pages, highlight viewing and playing
 	auto len = PatternPages(pattern);
 	auto currentpage = patternPage[pattern];
 	auto playingPage = playing ? (seqPos[pattern] / NUM_STEPKEYS) : -1;
@@ -1513,14 +1570,6 @@ void drawPatternTweaks(int pattern) {
 		}
 		strip.setPixelColor(11 + 4 + h, color);
 	}
-	// transpose keys
-	strip.setPixelColor(11, ORANGE);
-	strip.setPixelColor(12, RBLUE);
-	strip.setPixelColor(25, RBLUE);
-	strip.setPixelColor(26, ORANGE);
-
-	// solo
-	strip.setPixelColor(11 + 2, soloPattern == pattern ? MAGENTA : DKMAGENTA);
 
 	// mute / cue
 	if(omxMode == MODE_S1) {
@@ -1539,6 +1588,10 @@ void drawPatternTweaks(int pattern) {
 }
 
 void drawPatternIndicators() {
+	// function keys
+	strip.setPixelColor(1, FUNKONE);
+	strip.setPixelColor(2, FUNKTWO);
+
 	for(int p = 0; p < NUM_PATTERNS; p++){
 		const int pixel = PATTERN_TO_KEY(p);
 		if(omxMode == MODE_S1) {
@@ -1551,12 +1604,21 @@ void drawPatternIndicators() {
 		} else {
 			// highlight current viewing and show mutes
 			if(viewingPattern == p) {
-				strip.setPixelColor(pixel, seqColors[p]);
+				if(params == seq_pattern_params) {
+					strip.setPixelColor(pixel, blinkState ? (patternSettings[p].mute ? DKDKRED : HALFWHITE) : seqColors[p]);
+				} else {
+					strip.setPixelColor(pixel, seqColors[p]);
+				}
 			} else {
 				if(patternSettings[p].mute) {
-					strip.setPixelColor(pixel, LEDOFF);
+					strip.setPixelColor(pixel, DKDKRED);
 				} else {
-					strip.setPixelColor(pixel, muteColors[p]);
+					if(patternActive[p]) {
+						strip.setPixelColor(pixel, muteColors[p]);
+						patternActive[p] = 0;
+					} else {
+						strip.setPixelColor(pixel, LEDOFF);
+					}
 				}
 			}
 		}
@@ -2112,7 +2174,6 @@ bool handleKeyEventSeq(keypadEvent e) {
 		// STEP RECORD
 		selectedNote = thisKey;
 		selectedStep = seqPos[viewingPattern];
-		patternPage[viewingPattern] = getPatternPage(selectedStep);
 
 		int adjnote = notes[thisKey] + (octave * 12);
 		stepNoteP[viewingPattern][selectedStep].note = adjnote;
@@ -2188,10 +2249,9 @@ bool handleKeyEventSeq(keypadEvent e) {
 				int prevPattern = viewingPattern;
 				viewingPattern = KEY_TO_PATTERN(thisKey);
 				if(viewingPattern != prevPattern) {
-					selectedStep = 0;
-					patternPage[viewingPattern] = getPatternPage(selectedStep);
+					selectedStep = patternPage[viewingPattern] * NUM_STEPKEYS;
 					if(!playing) {
-						seqPos[viewingPattern] = 0;
+						seqPos[viewingPattern] = patternPage[viewingPattern] * NUM_STEPKEYS;
 					}
 				} else {
 					patternEditLock = false;
@@ -2287,6 +2347,10 @@ bool handleKeyEventSeq(keypadEvent e) {
 					} else if(KEY_TO_STEP(thisKey) == 2) {
 						// solo
 						soloStart(viewingPattern);
+					} else if(KEY_TO_STEP(thisKey) == 3) {
+						// page lock
+						pageLock[viewingPattern] = !pageLock[viewingPattern];
+						dirtyPixels = true;
 					} else if(KEY_TO_STEP(thisKey) == 0 || KEY_TO_STEP(thisKey) == 15) {
 						// transpose pattern by octaves
 						int transpose = KEY_TO_STEP(thisKey) == 0 ? -12 : 12;
@@ -2760,6 +2824,9 @@ void loop() {
 		// ignore incoming messages
 	}
 
+    if(keyPressTime[0] > 0) {
+        Serial.println(keyPressTime[0]);
+    }
 } // ######## END MAIN LOOP ########
 
 
@@ -2809,19 +2876,24 @@ void new_step_ahead(int patternNum) {
 
 void auto_reset(int p){
 	// should be conditioned on whether we're in S2!!
-	if ( nextPlayingPattern != -1 && seqPos[p] >= PatternLength(p)) {
+
+	if (omxMode == MODE_S1 && nextPlayingPattern != -1 && seqPos[p] >= PatternLength(p)) {
+		// jump to cued pattern in S1
 		playingPattern = nextPlayingPattern;
 		nextPlayingPattern = -1;
 		seqPos[playingPattern] = 0;
         step_ahead(playingPattern);
-		//patternPage[p] = getPatternPage(seqPos[p]); // FOLLOW MODE FOR SEQ PAGE
 		return;
 	}
+
 	if ( seqPos[p] >= PatternLength(p) ||
 		 (patternSettings[p].autoreset && (patternSettings[p].autoresetstep > (patternSettings[p].startstep) ) && (seqPos[p] >= patternSettings[p].autoresetstep)) ||
 		 (patternSettings[p].autoreset && (patternSettings[p].autoresetstep == 0 ) && (seqPos[p] >= patternSettings[p].rndstep)) ||
 		 (patternSettings[p].reverse && (seqPos[p] < 0)) || // normal reverse reset
-		 (patternSettings[p].reverse && patternSettings[p].autoreset && (seqPos[p] < patternSettings[p].startstep )) // ||
+		 (patternSettings[p].reverse && patternSettings[p].autoreset && (seqPos[p] < patternSettings[p].startstep )) ||
+		 (pageLock[p] && (seqPos[p] < patternPage[p] * NUM_STEPKEYS)) ||
+		 (pageLock[p] && (seqPos[p] > patternPage[p] * NUM_STEPKEYS + (NUM_STEPKEYS - 1)))
+		 // ||
 		 //(patternSettings[p].reverse && patternSettings[p].autoreset && (patternSettings[p].autoresetstep == 0 ) && (seqPos[p] < patternSettings[p].rndstep))
 		 ) {
 
@@ -2833,14 +2905,22 @@ void auto_reset(int p){
 					seqPos[p] = patternSettings[p].autoresetstep-1; // resets pattern in REV
 				}
 			} else {
-				seqPos[p] = (PatternLength(p)-patternSettings[p].startstep)-1;
+				if(pageLock[p]) {
+					seqPos[p] = patternPage[p] * NUM_STEPKEYS + (NUM_STEPKEYS - 1);
+				} else {
+					seqPos[p] = (PatternLength(p)-patternSettings[p].startstep)-1;
+				}
 			}
 
 		} else {
-			seqPos[p] = (patternSettings[p].startstep); // resets pattern in FWD
+			if(pageLock[p]) {
+				seqPos[p] = patternPage[p] * NUM_STEPKEYS;
+			} else {
+				seqPos[p] = (patternSettings[p].startstep); // resets pattern in FWD
+			}
 		}
 		if (patternSettings[p].autoresetfreq == patternSettings[p].current_cycle){ // reset cycle logic
-			if (probResult(patternSettings[p].autoresetprob)){
+			if (probResult(patternSettings[p].autoresetprob, 100)){
 				// chance of doing autoreset
 				patternSettings[p].autoreset = true;
 			} else {
@@ -2853,22 +2933,23 @@ void auto_reset(int p){
 		}
 		patternSettings[p].rndstep = (rand() % PatternLength(p)) + 1; // randomly choose step for next cycle
 	}
-	//patternPage[p] = getPatternPage(seqPos[p]); // FOLLOW MODE FOR SEQ PAGE
 	
 // return ()
 }
 
-bool probResult(int probSetting){
-//	int tempProb = (rand() % probSetting);
-	if (probSetting == 0){
+bool probResult(int stepProbSetting, int patternProbSetting){
+	if (stepProbSetting > 100){
+		return true;
+	}
+	if (stepProbSetting == 0 || patternProbSetting == 0){
 		return false;
 	}
-	if((rand() % 100) < probSetting){ // assumes probSetting is a range 0-100
+	if(rand() % 100 < stepProbSetting && rand() % 100 < patternProbSetting) { // assumes probSetting is a range 0-100
 		return true;
 	} else {
 		return false;
 	}
- }
+}
 
 bool evaluate_AB(int condition, int patternNum) {
 	bool shouldTrigger = false;;
@@ -3098,11 +3179,10 @@ void doArp(Micros dt) {
 
 void doStep() {
 // // probability test
-	bool testProb = probResult(stepNoteP[playingPattern][seqPos[playingPattern]].prob);
-
 	switch(omxMode){
 		case MODE_S1:
 			if(playing) {
+				bool testProb = probResult(stepNoteP[playingPattern][seqPos[playingPattern]].prob, patternSettings[playingPattern].prob);
 				// ############## STEP TIMING ##############
 //				if(micros() >= nextStepTime){
 				if(micros() >= timePerPattern[playingPattern].nextStepTimeP){
@@ -3167,18 +3247,20 @@ void doStep() {
 							}
 						} else {
 							if (!patternSettings[j].mute) {
-								if (evaluate_AB(stepNoteP[j][seqPos[j]].condition, j)){
-									seqPlayPatternStep(j);
+								bool testProb = probResult(stepNoteP[j][seqPos[j]].prob, patternSettings[j].prob);
+								if(testProb) {
+									if (evaluate_AB(stepNoteP[j][seqPos[j]].condition, j)){
+										seqPlayPatternStep(j);
+									}
 								}
 							}
 						}
-						if(j == playingPattern){ // only show selected pattern
+						if(j == viewingPattern){ // only show selected pattern
 							drawSeqLEDs(viewingPattern);
 						}
 						new_step_ahead(j);
 					}
 				}
-
 
 			} else {
 				drawSeqLEDs(viewingPattern);
@@ -3362,6 +3444,10 @@ void seqPlayScheduledNote(int note, int vel, int channel, int noteon_micros, int
 // Play a note / step (SEQUENCERS)
 void seqPlayPatternStep(int patternNum) {
 //	Serial.println(stepNoteP[patternNum][seqPos[patternNum]].note); // Debug
+	if (stepNoteP[patternNum][seqPos[patternNum]].trig != TRIGTYPE_PLAY){
+		return;
+	}
+
 	bool sendnoteCV = false;
 	int rnd_swing;
 	if (cvPattern[patternNum]){
@@ -3424,53 +3510,52 @@ void seqPlayPatternStep(int patternNum) {
 
 	// regular note on trigger
 
-	if (stepNoteP[patternNum][seqPos[patternNum]].trig == TRIGTYPE_PLAY){
-		if (seqPos[patternNum] % 2 == 0){
-			if (patternSettings[patternNum].swing < 99){
-				noteon_micros = micros() + ((ppqInterval * multValues[patternSettings[patternNum].clockDivMultP])/(PPQ / 24) * patternSettings[patternNum].swing); // full range swing
+	if (seqPos[patternNum] % 2 == 0){
+		if (patternSettings[patternNum].swing < 99){
+			noteon_micros = micros() + ((ppqInterval * multValues[patternSettings[patternNum].clockDivMultP])/(PPQ / 24) * patternSettings[patternNum].swing); // full range swing
 //				Serial.println((ppqInterval * multValues[patternSettings[patternNum].clockDivMultP])/(PPQ / 24) * patternSettings[patternNum].swing);
 //			} else if ((patternSettings[patternNum].swing > 50) && (patternSettings[patternNum].swing < 99)){
 //			   noteon_micros = micros() + ((step_micros * multValues[patternSettings[patternNum].clockDivMultP]) * ((patternSettings[patternNum].swing - 50)* .01) ); // late swing
 //			   Serial.println(((step_micros * multValues[patternSettings[patternNum].clockDivMultP]) * ((patternSettings[patternNum].swing - 50)* .01) ));
-			} else if (patternSettings[patternNum].swing == 99){ // random drunken swing
-				rnd_swing = rand() % 95 + 1; // rand 1 - 95 // randomly apply swing value
-				noteon_micros = micros() + ((ppqInterval * multValues[patternSettings[patternNum].clockDivMultP])/(PPQ / 24) * rnd_swing);
-			}
-
-		} else {
-			noteon_micros = micros();
+		} else if (patternSettings[patternNum].swing == 99){ // random drunken swing
+			rnd_swing = rand() % 95 + 1; // rand 1 - 95 // randomly apply swing value
+			noteon_micros = micros() + ((ppqInterval * multValues[patternSettings[patternNum].clockDivMultP])/(PPQ / 24) * rnd_swing);
 		}
 
-		seqPlayScheduledNote(
-			stepNoteP[patternNum][seqPos[patternNum]].note,
-			stepNoteP[patternNum][seqPos[patternNum]].vel,
-			PatternChannel(patternNum),
-			noteon_micros,
-			(stepNoteP[patternNum][seqPos[patternNum]].len + 1) * step_micros,
-			sendnoteCV
-		);
-
-		// {notenum, vel, notelen, step_type, {p1,p2,p3,p4}, prob}
-		// send param locks
-		if(disablePLock[patternNum] == false) {
-			for (int q=0; q<4; q++){
-				int tempCC = stepNoteP[patternNum][seqPos[patternNum]].params[q];
-				if (tempCC > -1) {
-					MM::sendControlChange(pots[potbank][q],tempCC,PatternChannel(patternNum));
-					prevPlock[q] = tempCC;
-				} else if (prevPlock[q] != potValues[q]) {
-					//if (tempCC != prevPlock[q]) {
-					MM::sendControlChange(pots[potbank][q],potValues[q],PatternChannel(patternNum));
-					prevPlock[q] = potValues[q];
-					//}
-				}
-			}
-		}
-		lastNote[patternNum][seqPos[patternNum]] = stepNoteP[patternNum][seqPos[patternNum]].note;
-
-		// CV is sent from pendingNoteOns/pendingNoteOffs
-
+	} else {
+		noteon_micros = micros();
 	}
+
+	seqPlayScheduledNote(
+		stepNoteP[patternNum][seqPos[patternNum]].note,
+		(stepNoteP[patternNum][seqPos[patternNum]].vel * patternSettings[patternNum].vel) / 127,
+		PatternChannel(patternNum),
+		noteon_micros,
+		(stepNoteP[patternNum][seqPos[patternNum]].len + 1) * step_micros,
+		sendnoteCV
+	);
+
+	// {notenum, vel, notelen, step_type, {p1,p2,p3,p4}, prob}
+	// send param locks
+	if(disablePLock[patternNum] == false) {
+		for (int q=0; q<4; q++){
+			int tempCC = stepNoteP[patternNum][seqPos[patternNum]].params[q];
+			if (tempCC > -1) {
+				MM::sendControlChange(pots[potbank][q],tempCC,PatternChannel(patternNum));
+				prevPlock[q] = tempCC;
+			} else if (prevPlock[q] != potValues[q]) {
+				//if (tempCC != prevPlock[q]) {
+				MM::sendControlChange(pots[potbank][q],potValues[q],PatternChannel(patternNum));
+				prevPlock[q] = potValues[q];
+				//}
+			}
+		}
+	}
+	lastNote[patternNum][seqPos[patternNum]] = stepNoteP[patternNum][seqPos[patternNum]].note;
+	patternActive[patternNum] = 1;
+	dirtyPixels = true;
+
+	// CV is sent from pendingNoteOns/pendingNoteOffs
 }
 
 void allNotesOff() {
@@ -3614,7 +3699,7 @@ void clearPattern(int patternNum){
 		stepNoteP[patternNum][i].condition = 0;
 	}
 	// also revert settings
-	patternSettings[patternNum] = { 15, (uint8_t)patternNum, 0, 0, 0, 0, 1, 3, 1, 0, false, false, false, false };
+	patternSettings[patternNum] = { 15, (uint8_t)patternNum, 0, 0, 0, 0, 1, 2, 1, 0, 100, 127, false, false, false, false };
 }
 
 void copyStep(int patternNum, int step){
@@ -3755,19 +3840,7 @@ void initPatterns( void ) {
 			memcpy( &stepNoteP[i][j], &stepNote, sizeof(StepNote) );
 		}
 
-		patternSettings[i].len = 15;
-		patternSettings[i].channel = i;		// 0 - 15 becomes 1 - 16
-		patternSettings[i].mute = false;
-		patternSettings[i].reverse = false;
-		patternSettings[i].swing = 0;
-		patternSettings[i].startstep = 0;
-		patternSettings[i].autoresetstep = 0;
-		patternSettings[i].autoresetfreq = 0;
-		patternSettings[i].autoresetprob = 0;
-		patternSettings[i].current_cycle = 1;
-		patternSettings[i].rndstep = 3;
-		patternSettings[i].autoreset = false;
-		patternSettings[i].solo = false;
+		clearPattern(i);
 	}
 }
 
