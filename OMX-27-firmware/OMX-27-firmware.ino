@@ -143,29 +143,6 @@ uint32_t muteColor = 0x000000;
 
 bool mode_select = false;
 
-int dangerConfirm = 0;
-#define DANGER_CONFIRM_TIME 300
-
-// macro that allows us to wrap a block of code in a confirm dialog requiring double press of key
-#define DANGER_CONFIRM(key, msg, ...) { \
-	if(dangerConfirm != key) { \
-		snprintf(messageText, MESSAGE_TEXT_LEN, msg); \
-		dangerConfirm = (key); \
-		setMessage(DANGER_CONFIRM_TIME); \
-		dangerConfirmTimeout = DANGER_CONFIRM_TIME; \
-	} else { \
-		__VA_ARGS__ \
-	} \
-}
-
-int dangerConfirmTimeout = 0;
-
-#define MESSAGE(...) { \
-	snprintf(messageText, MESSAGE_TEXT_LEN, __VA_ARGS__); \
-	setMessage(500); \
-	dirtyDisplay = true; \
-}
-
 bool arp = false;
 bool arpLatch = false;
 int arpTimer = 0;
@@ -249,8 +226,6 @@ bool patternEditLock = false;
 
 int soloPattern = -1;
 
-int messageTextTimer = 0;
-
 int clearedPageTimer = 0;
 int clearedPage = -1;
 
@@ -328,6 +303,73 @@ void uiDrawValueNote(int value, int x) {
 	}
 }
 
+const int chordPatterns[][3] = {
+	{ -1, -1, -1 }, // 0:  N/A
+	{ 4, 7, -1 },   // 1:  MAJ
+	{ 3, 7, -1 },   // 2:  MIN
+	{ 4, 7, 11 },   // 3:  MAJ7
+	{ 3, 7, 10 },   // 4:  MIN7
+	{ 4, 7, 10 },   // 5:  7
+	{ 2, 7, -1 },   // 6:  SUS2
+	{ 5, 7, -1 },   // 7:  SUS4
+	{ 4, 8, -1 },   // 8:  AUG
+	{ 3, 6, -1 },   // 9:  DIM
+	{ 3, 6, 10 },   // 10: HDIM
+	{ 7, -1, -1 },  // 11: 5
+	{ 4, 11, 14 },  // 12: MAJ9
+	{ 3, 10, 14 },  // 13: MIN9
+	{ 4, 10, 14 },  // 14: 9
+	{ 3, 6, 9 },    // 15: FDIM
+};
+
+void uiDrawValueChord(int value, int x) {
+	if(value == 1) {
+		u8g2centerText("MAJ", x*32, hline*2+3, 32, uiDrawTextY);
+	} else if(value == 2) {
+		u8g2centerText("MIN", x*32, hline*2+3, 32, uiDrawTextY);
+	} else if(value == 3) {
+		u8g2centerText("MAJ7", x*32, hline*2+3, 32, uiDrawTextY);
+	} else if(value == 4) {
+		u8g2centerText("MIN7", x*32, hline*2+3, 32, uiDrawTextY);
+	} else if(value == 5) {
+		u8g2centerText("7", x*32, hline*2+3, 32, uiDrawTextY);
+	} else if(value == 6) {
+		u8g2centerText("SUS2", x*32, hline*2+3, 32, uiDrawTextY);
+	} else if(value == 7) {
+		u8g2centerText("SUS4", x*32, hline*2+3, 32, uiDrawTextY);
+	} else if(value == 8) {
+		u8g2centerText("AUG", x*32, hline*2+3, 32, uiDrawTextY);
+	} else if(value == 9) {
+		u8g2centerText("DIM", x*32, hline*2+3, 32, uiDrawTextY);
+	} else if(value == 10) {
+		u8g2centerText("HDIM", x*32, hline*2+3, 32, uiDrawTextY);
+	} else if(value == 11) {
+		u8g2centerText("5", x*32, hline*2+3, 32, uiDrawTextY);
+	} else if(value == 12) {
+		u8g2centerText("MAJ9", x*32, hline*2+3, 32, uiDrawTextY);
+	} else if(value == 13) {
+		u8g2centerText("MIN9", x*32, hline*2+3, 32, uiDrawTextY);
+	} else if(value == 14) {
+		u8g2centerText("9", x*32, hline*2+3, 32, uiDrawTextY);
+	} else if(value == 15) {
+		u8g2centerText("FDIM", x*32, hline*2+3, 32, uiDrawTextY);
+	} else {
+		u8g2centerText("---", x*32, hline*2+3, 32, uiDrawTextY);
+	}
+}
+
+
+const ui_param param_DUMMY = {
+	"",
+	NULL,
+	true,
+	0,
+	0,
+	uiDrawValueNone,
+	NULL,
+	NULL,
+	NULL,
+};
 
 const ui_param param_OCT = {
 	"OCT",
@@ -874,7 +916,7 @@ const ui_param seq_pattern_params[] = {
 		false,
 		0,
 		127,
-		uiDrawValuePercent,
+		uiDrawValueInt,
 		[](int* valPtr, int newVal, int amt)->void {
 			patternSettings[viewingPattern].vel = newVal;
 		},
@@ -883,6 +925,24 @@ const ui_param seq_pattern_params[] = {
 			return (int)patternSettings[viewingPattern].vel;
 		}
 	},
+	{
+		"GATE",
+		NULL,
+		false,
+		0,
+		127,
+		uiDrawValueInt,
+		[](int* valPtr, int newVal, int amt)->void {
+			patternSettings[viewingPattern].gate = newVal;
+		},
+		NULL,
+		[]()->int {
+			return (int)patternSettings[viewingPattern].gate;
+		}
+	},
+	param_DUMMY,
+	param_DUMMY,
+
 	{
 		"RS.START",
 		NULL,
@@ -996,6 +1056,24 @@ const ui_param param_SeqNLEN = {
 	}
 };
 
+const ui_param param_SeqCHORD = {
+	"CHORD",
+	NULL,
+	false,
+	0,
+	15,
+	uiDrawValueChord,
+	[](int* valPtr, int newVal, int amt)->void {
+		stepNoteP[viewingPattern][selectedStep].chord = newVal;
+	},
+	NULL,
+	[]()->int {
+		return (int)stepNoteP[viewingPattern][selectedStep].chord;
+	}
+};
+
+
+
 const ui_param param_SeqSTEP = {
 	"STEP",
 	NULL,
@@ -1067,9 +1145,7 @@ const ui_param seq_note_select_params[] = {
 			return (int)stepNoteP[viewingPattern][selectedStep].condition;
 		}
 	},
-	{
-		"---",
-	},
+	param_SeqCHORD,
 	///
 	{
 		"L-1",
@@ -1187,9 +1263,9 @@ void resetClocks(){
 	step_delay = step_micros * 0.001; 	// ppqInterval * 0.006; // 60000 / clockbpm / 4;
 }
 
-void setGlobalSwing(int swng_amt){
+void setGlobalSwing(int swing_amt){
 	for(int z=0; z<NUM_PATTERNS; z++) {
-		patternSettings[z].swing = swng_amt;
+		patternSettings[z].swing = swing_amt;
 	}
 }
 
@@ -1522,6 +1598,14 @@ void drawPatternSteps(int pattern) {
 						// note length
 						int len = stepNoteP[pattern][i].len;
 						stepColor = strip.gamma32(strip.ColorHSV((65535 / 8) * 1, rainbowSaturation, CLAMP(len * 48, 64, 255)));
+					} else if(*param == 5) {
+						// prob
+						int prob = stepNoteP[pattern][i].prob;
+						if(prob > 100) {
+							stepColor = strip.gamma32(strip.ColorHSV(0, 0, 255));
+						} else {
+							stepColor = strip.gamma32(strip.ColorHSV((65535 / 8) * 2, rainbowSaturation, CLAMP(prob * 2, 64, 255)));
+						}
 					}
 				}
 				if(*param == 0) {
@@ -1701,7 +1785,7 @@ void drawSeqLEDs(int patternNum) {
 			if (j < PatternLength(patternNum)){ 
 				// ONLY DO LEDS FOR THE CURRENT PAGE
 
-				if (j == seqPos[viewingPattern]){
+				if (j == selectedStep){
 					strip.setPixelColor(pixelpos, SEQCHASE);
 				} else if (pixelpos != selectedNote){
 					strip.setPixelColor(pixelpos, LEDOFF);
@@ -1840,21 +1924,58 @@ void dispPageIndicators(int page, bool selected){
 	}
 }
 
-void setMessage(int time) {
-	messageTextTimer = time;
-	if(time != 0) {
-		Serial.println(messageText);
-	}
+// MESSAGE DISPLAY
+const int MESSAGE_TIMEOUT_US = 700000;
+int messageDisplayTimer = 0;
+
+void displayMessageEx(const uint8_t* font, const int time, const char* msg) {
+	Serial.print("displayMessageEx ");
+	Serial.println(msg);
+	display.fillRect(0, 0, 128, 32, BLACK);
+	u8g2_display.setFontMode(1);
+	u8g2_display.setFont(font);
+	u8g2_display.setForegroundColor(WHITE);
+	u8g2_display.setBackgroundColor(BLACK);
+	u8g2centerText(msg, 0, 10, 128, 32);
+
+	// nothing else will be drawn until this timer expires
+	messageDisplayTimer = time;
 	dirtyDisplay = true;
 }
 
-void displayMessage() {
-	display.fillRect(0, 0, 128, 32, BLACK);
-	u8g2_display.setFontMode(1);
-	u8g2_display.setFont(FONT_VALUES);
-	u8g2_display.setForegroundColor(WHITE);
-	u8g2_display.setBackgroundColor(BLACK);
-	u8g2centerText(messageText, 0, 10, 128, 32);
+void displayMessagefEx(const uint8_t* font, const int time, const char* fmt, ...) {
+	va_list args;
+	va_start(args, fmt);
+	char buf[24];
+	vsnprintf(buf, sizeof(buf), fmt, args);
+	va_end(args);
+	displayMessageEx(font, time, buf);
+}
+
+void clearMessage() {
+	if(messageDisplayTimer > 0) {
+		Serial.println("clearMessage");
+		messageDisplayTimer = 1;
+		dirtyDisplay = true;
+	}
+}
+
+#define displayMessage(msg) displayMessageEx(FONT_VALUES, MESSAGE_TIMEOUT_US, msg)
+#define displayMessagef(...) displayMessagefEx(FONT_VALUES, MESSAGE_TIMEOUT_US, __VA_ARGS__)
+
+int dangerConfirm = -1;
+int dangerConfirmTimer = 0;
+#define DANGER_CONFIRM_TIME 700000
+
+// macro that allows us to wrap a block of code in a confirm dialog requiring double press of key
+#define DANGER_CONFIRM(key, msg, ...) { \
+	if(dangerConfirm != key) { \
+		displayMessagefEx(FONT_VALUES, DANGER_CONFIRM_TIME, msg); \
+		dangerConfirm = (key); \
+		dangerConfirmTimer = DANGER_CONFIRM_TIME; \
+	} else { \
+		__VA_ARGS__ \
+	} \
 }
 
 void dispMode(){
@@ -1946,7 +2067,7 @@ bool handleKeyEventCommon(keypadEvent e) {
 			seqStop();
 			allNotesOffPanic();
 			playing = false;
-			MESSAGE("PANIC!");
+			displayMessage("PANIC!");
 			invalidateShortPress[0] = true;
 			return true;
 		}
@@ -2057,7 +2178,7 @@ bool handleKeyEventMidi(keypadEvent e, int pattern) {
 				}
 				strip.show();
 				// show the name of the scale for a moment
-				MESSAGE("%s %s", noteNames[scaleRoot], scaleNames[scalePattern]);
+				displayMessagef("%s %s", noteNames[scaleRoot], scaleNames[scalePattern]);
 				dirtyPixels = true;
 				return true;
 			}
@@ -2093,7 +2214,7 @@ bool handleKeyEventSeq(keypadEvent e) {
 			seqStepNoteSelect = false;
 			invalidateShortPress[0] = true;
 			invalidateShortPress[thisKey] = true;
-			MESSAGE("CANCELED");
+			displayMessage("CANCELED");
 			dirtyPixels = true;
 			return true;
 		} else if(down) {
@@ -2107,7 +2228,7 @@ bool handleKeyEventSeq(keypadEvent e) {
 			invalidateShortPress[thisKey] = true;
 			if(!AUX_HELD) {
 				seqStepNoteSelect = false;
-				setMessage(0);
+				clearMessage();
 			}
 			return true;
 		}
@@ -2115,29 +2236,29 @@ bool handleKeyEventSeq(keypadEvent e) {
 	}
 	if(patternEdit == false && seqStepHold == false) {
 		if(down == false && (thisKey == 1 || thisKey == 2)) {
-			setMessage(0);
+			clearMessage();
 			if(F1_HELD) {
-				MESSAGE("COPY");
+				displayMessage("COPY");
 			} else if(F2_HELD) {
 				if(AUX_HELD) {
-					MESSAGE("MUTE");
+					displayMessage("MUTE");
 				} else {
-					MESSAGE("PASTE");
+					displayMessage("PASTE");
 				}
 			}
 			dangerConfirm = false;
 		}
 		if(down && ((thisKey == 1 && F2_HELD) || (thisKey == 2 && F1_HELD))) {
-			MESSAGE("CUT");
+			displayMessage("CUT");
 			dangerConfirm = false;
 		} else if(down && thisKey == 1) {
-			MESSAGE("COPY");
+			displayMessage("COPY");
 			dangerConfirm = false;
 		} else if(down && thisKey == 2) {
 			if(AUX_HELD) {
-				MESSAGE("MUTE");
+				displayMessage("MUTE");
 			} else {
-				MESSAGE("PASTE");
+				displayMessage("PASTE");
 			}
 			dangerConfirm = false;
 		}
@@ -2145,7 +2266,7 @@ bool handleKeyEventSeq(keypadEvent e) {
 	if (seqStepHold) {
 		if(down && thisKey == 0) {
 			invalidateShortPress[0] = true;
-			MESSAGE("NOTE SEL S%d", selectedStep);
+			displayMessagef("NOTE SEL S%d", selectedStep);
 			seqStepNoteSelect = true;
 			seqStepHold = false;
 			seqStepEdit = false;
@@ -2171,18 +2292,33 @@ bool handleKeyEventSeq(keypadEvent e) {
 			dirtyDisplay = true;
 		}
 	} else if(down && stepRecord) {
-		// STEP RECORD
-		selectedNote = thisKey;
-		selectedStep = seqPos[viewingPattern];
+		if(thisKey == 0) {
+			// exit step record
+			stepRecord = false;
+			stepDirty = true;
+			dirtyDisplay = true;
+		} else {
+			// STEP RECORD
+			selectedNote = thisKey;
+			int adjnote = notes[thisKey] + (octave * 12);
+			stepNoteP[viewingPattern][selectedStep].note = adjnote;
+			stepNoteP[viewingPattern][selectedStep].trig = TRIGTYPE_PLAY;
 
-		int adjnote = notes[thisKey] + (octave * 12);
-		stepNoteP[viewingPattern][selectedStep].note = adjnote;
+			if (!playing){
+				midiNoteOn(thisKey, defaultVelocity, PatternChannel(viewingPattern));
+			} // see RELEASE events for more
+			stepDirty = true;
+			dirtyDisplay = true;
 
-		if (!playing){
-			midiNoteOn(thisKey, defaultVelocity, PatternChannel(viewingPattern));
-		} // see RELEASE events for more
-		stepDirty = true;
-		dirtyDisplay = true;
+			// increment step
+			selectedStep++;
+			if(selectedStep >= PatternLength(viewingPattern)) {
+				stepRecord = false;
+				displayMessage("DONE");
+			} else {
+				displayMessagef("STEP REC %d/%d", selectedStep+1, PatternLength(viewingPattern));
+			}
+		}
 	} else {
 		// REGULAR SEQ MODE
 		// BLACK KEYS - SELECT PATTERN
@@ -2205,23 +2341,23 @@ bool handleKeyEventSeq(keypadEvent e) {
 						// cue next pattern
 						nextPlayingPattern = thisKey-3;
 						seqPos[nextPlayingPattern] = 0;
-						MESSAGE("CUE P%d", nextPlayingPattern+1);
+						displayMessagef("CUE P%d", nextPlayingPattern+1);
 					} else {
 						// toggle mute for pattern
 						patternSettings[KEY_TO_PATTERN(thisKey)].mute = !patternSettings[KEY_TO_PATTERN(thisKey)].mute;
 						if(patternSettings[KEY_TO_PATTERN(thisKey)].mute) {
-							MESSAGE("MUTED P%d", thisKey-3);
+							displayMessagef("MUTED P%d", thisKey-3);
 						} else {
-							MESSAGE("UNMUTED P%d", thisKey-3);
+							displayMessagef("UNMUTED P%d", thisKey-3);
 						}
 					}
 				} else {
 					// step record
 					viewingPattern = thisKey-3;
-					seqPos[viewingPattern] = 0;
+					selectedStep = 0;
 					stepRecord = true;
 					dirtyDisplay = true;
-					MESSAGE("STEP RECORD");
+					displayMessagef("STEP REC %d/%d", selectedStep+1, PatternLength(viewingPattern));
 					invalidateShortPress[0] = true;
 				}
 				return true;
@@ -2229,19 +2365,18 @@ bool handleKeyEventSeq(keypadEvent e) {
 				DANGER_CONFIRM(thisKey, "CONFIRM CUT?", {
 					copyPattern(KEY_TO_PATTERN(thisKey));
 					clearPattern(KEY_TO_PATTERN(thisKey));
-					MESSAGE("CUT P%d", KEY_TO_PATTERN(thisKey)+1);
+					displayMessagef("CUT P%d", KEY_TO_PATTERN(thisKey)+1);
 					dangerConfirm = false;
 				});
 			} else if(F1_HELD) {
 				// copy pattern
 				copyPattern(KEY_TO_PATTERN(thisKey));
-				MESSAGE("COPIED P%d", KEY_TO_PATTERN(thisKey)+1);
+				displayMessagef("COPIED P%d", KEY_TO_PATTERN(thisKey)+1);
 			} else if(F2_HELD) {
 				// paste pattern
 				DANGER_CONFIRM(thisKey, "CONFIRM PASTE?", {
 					pastePattern(KEY_TO_PATTERN(thisKey));
-					MESSAGE("PASTED P%d", KEY_TO_PATTERN(thisKey)+1);
-					setMessage(500);
+					displayMessagef("PASTED P%d", KEY_TO_PATTERN(thisKey)+1);
 					dangerConfirm = false;
 				});
 			} else {
@@ -2264,7 +2399,6 @@ bool handleKeyEventSeq(keypadEvent e) {
 				dirtyPixels = true;
 
 				//snprintf(messageText, MESSAGE_TEXT_LEN, "P%d PAGE SELECT", viewingPattern+1);
-				//setMessage(500);
 
 				setParamModePattern();
 
@@ -2283,7 +2417,7 @@ bool handleKeyEventSeq(keypadEvent e) {
 							SetPatternLength(viewingPattern, (newPage+1) * NUM_STEPKEYS);
 							clearedPage = -1;
 							clearedPageTimer = 0;
-							MESSAGE("REM PAGE %d", KEY_TO_PAGE(thisKey)+1);
+							displayMessagef("REM PAGE %d", KEY_TO_PAGE(thisKey)+1);
 							if(selectedStep > PatternLength(viewingPattern)) {
 								selectedStep = CLAMP(selectedStep, 0, PatternLength(viewingPattern)-1);
 								patternPage[viewingPattern] = getPatternPage(selectedStep);
@@ -2292,7 +2426,7 @@ bool handleKeyEventSeq(keypadEvent e) {
 							DANGER_CONFIRM(thisKey, "CONFIRM CUT?", {
 								copyPage(viewingPattern, KEY_TO_PAGE(thisKey));
 								clearPage(viewingPattern, KEY_TO_PAGE(thisKey));
-								MESSAGE("CUT PAGE %d", KEY_TO_PAGE(thisKey)+1);
+								displayMessagef("CUT PAGE %d", KEY_TO_PAGE(thisKey)+1);
 
 								clearedPage = KEY_TO_PAGE(thisKey);
 								clearedPageTimer = shortPressInterval * 2;
@@ -2303,13 +2437,13 @@ bool handleKeyEventSeq(keypadEvent e) {
 				} else if(F1_HELD) { // copy page
 					if(KEY_TO_PAGE(thisKey) >= 0 && KEY_TO_PAGE(thisKey) < 4) {
 						copyPage(viewingPattern, KEY_TO_PAGE(thisKey));
-						MESSAGE("COPIED PAGE %d", KEY_TO_PAGE(thisKey)+1);
+						displayMessagef("COPIED PAGE %d", KEY_TO_PAGE(thisKey)+1);
 					}
 				} else if(F2_HELD) { // paste page
 					if(KEY_TO_PAGE(thisKey) >= 0 && KEY_TO_PAGE(thisKey) < 4) {
 						DANGER_CONFIRM(thisKey, "CONFIRM PASTE?", {
 							pastePage(viewingPattern, KEY_TO_PAGE(thisKey));
-							MESSAGE("PASTED PAGE %d", KEY_TO_PAGE(thisKey)+1);
+							displayMessagef("PASTED PAGE %d", KEY_TO_PAGE(thisKey)+1);
 							dangerConfirm = false;
 							// TODO: extend pattern to fit
 						});
@@ -2326,7 +2460,7 @@ bool handleKeyEventSeq(keypadEvent e) {
 								dirtyDisplay = true;
 								dirtyPixels = true;
 								dangerConfirm = 0;
-								MESSAGE("P%d len: %d", viewingPattern, PatternLength(viewingPattern));
+								displayMessagef("P%d len: %d", viewingPattern, PatternLength(viewingPattern));
 							});
 						}
 						patternPage[viewingPattern] = CLAMP(newPage, 0, PatternPages(viewingPattern)-1);
@@ -2367,7 +2501,7 @@ bool handleKeyEventSeq(keypadEvent e) {
 							// cue next pattern
 							nextPlayingPattern = viewingPattern;
 							seqPos[nextPlayingPattern] = 0;
-							MESSAGE("CUE P%d", nextPlayingPattern+1);
+							displayMessagef("CUE P%d", nextPlayingPattern+1);
 						} else {
 							// toggle mute for pattern
 							patternSettings[viewingPattern].mute = !patternSettings[viewingPattern].mute;
@@ -2390,17 +2524,18 @@ bool handleKeyEventSeq(keypadEvent e) {
 				// clear step
 				copyStep(viewingPattern, seqKey);
 				clearStep(viewingPattern, seqKey);
-				MESSAGE("CUT S%d", seqKey);
+				displayMessagef("CUT S%d", seqKey);
 			} else if (F1_HELD) {
 				// copy step
 				copyStep(viewingPattern, seqKey);
-				MESSAGE("COPIED S%d", seqKey);
+				displayMessagef("COPIED S%d", seqKey);
 			} else if (F2_HELD) {
 				// paste step
 				pasteStep(viewingPattern, seqKey);
-				MESSAGE("PASTED S%d", seqKey);
+				displayMessagef("PASTED S%d", seqKey);
+				dirtyDisplay = true;
 			} else if (AUX_HELD) {
-				MESSAGE("NOTE SEL S%d", seqKey);
+				displayMessagef("NOTE SEL S%d", seqKey);
 				seqStepNoteSelect = true;
 				selectedStep = seqKey;
 				dirtyPixels = true;
@@ -2470,8 +2605,7 @@ bool handleKeyEventSeq(keypadEvent e) {
 			if(patternEditLock == false) {
 				patternEdit = false;
 			}
-			setMessage(0);
-			dirtyDisplay = true;
+			clearMessage();
 		} else {
 			if(previewLastNote != -1) {
 				rawNoteOff(previewLastNote, previewLastChannel);
@@ -2486,7 +2620,6 @@ bool handleKeyEventSeq(keypadEvent e) {
 			midiNoteOff(thisKey, PatternChannel(viewingPattern));
 		}
 		if (stepRecord && stepDirty) {
-			step_ahead(viewingPattern);
 			stepDirty = false;
 		}
 	}
@@ -2558,7 +2691,9 @@ void loop() {
 	}
 
 	// DISPLAY SETUP
-	display.clearDisplay();
+	if(messageDisplayTimer == 0) {
+		display.clearDisplay();
+	}
 
 	// ############### POTS ###############
 	//
@@ -2575,12 +2710,6 @@ void loop() {
 	}
 	if(clearedPageTimer > 0) {
 		clearedPageTimer--;
-	}
-	if(dangerConfirmTimeout > 0) {
-		dangerConfirmTimeout--;
-		if(dangerConfirmTimeout <= 0) {
-			dangerConfirm = -1;
-		}
 	}
 
 	switch(omxMode) {
@@ -2648,13 +2777,24 @@ void loop() {
 						}
 						strip.show();
 						// show the name of the scale for a moment
-						MESSAGE("%s %s", noteNames[scaleRoot], scaleNames[scalePattern]);
-						break;
+						displayMessagef("%s %s", noteNames[scaleRoot], scaleNames[scalePattern]);
 					}
 					break;
 				case MODE_S1: // SEQ 1
 					// FALL THROUGH
 				case MODE_S2: // SEQ 2
+					if(soloPattern != -1) {
+						if (scaleSelectHold) {
+							scalePattern = WRAP(scalePattern + amt, getNumScales());
+							setScale(scaleRoot, scalePattern);
+							for(int n = 1; n < 27; n++) {
+								strip.setPixelColor(n, getDefaultColor(n));
+							}
+							strip.show();
+							// show the name of the scale for a moment
+							displayMessagef("%s %s", noteNames[scaleRoot], scaleNames[scalePattern]);
+						}
+					}
 					break;
 				case MODE_CONFIG:
 				default:
@@ -2767,6 +2907,24 @@ void loop() {
 	}
 
 	// ############### MODES DISPLAY  ##############
+	if(dangerConfirmTimer > 0) {
+		dangerConfirmTimer -= passed;
+		if(dangerConfirmTimer <= 0) {
+			dangerConfirmTimer = 0;
+			dangerConfirm = -1;
+		}
+	}
+	if(messageDisplayTimer > 0) {
+		if(scaleSelectHold == false) {
+			messageDisplayTimer -= passed;
+			if(messageDisplayTimer <= 0) {
+				Serial.print("message display timer expired");
+				dirtyDisplay = true;
+				display.clearDisplay();
+				messageDisplayTimer = 0;
+			}
+		}
+	}
 
 	if(!mode_select) {
 		switch(omxMode){
@@ -2786,19 +2944,9 @@ void loop() {
 			default:
 				break;
 		}
-		if (dirtyDisplay){			// DISPLAY
+		if (dirtyDisplay && messageDisplayTimer == 0){			// DISPLAY
 			dispGenericMode(params, numParams, *param);
 		}
-	}
-
-	if(messageTextTimer > 0) {
-		messageTextTimer--;
-		if(messageTextTimer == 0) {
-			dirtyDisplay = true;
-		}
-	}
-	if(messageTextTimer > 0) {
-		displayMessage();
 	}
 
 	// DISPLAY at end of loop
@@ -2823,10 +2971,6 @@ void loop() {
 	while (MM::midiRead()) {
 		// ignore incoming messages
 	}
-
-    if(keyPressTime[0] > 0) {
-        Serial.println(keyPressTime[0]);
-    }
 } // ######## END MAIN LOOP ########
 
 
@@ -3111,7 +3255,7 @@ void soloStart(int pattern) {
 	patternEdit = false;
 	patternHold = false;
 	arpReset();
-	MESSAGE("SOLO P%d", soloPattern);
+	displayMessagef("SOLO P%d", soloPattern);
 	dirtyPixels = true;
 	dirtyDisplay = true;
 }
@@ -3526,14 +3670,35 @@ void seqPlayPatternStep(int patternNum) {
 		noteon_micros = micros();
 	}
 
+	Micros noteLength_micros = (stepNoteP[patternNum][seqPos[patternNum]].len + 1) * ((step_micros * patternSettings[patternNum].gate) / 127);
+	int baseNote = stepNoteP[patternNum][seqPos[patternNum]].note;
+	int noteVel = (stepNoteP[patternNum][seqPos[patternNum]].vel * patternSettings[patternNum].vel) / 127;
+
 	seqPlayScheduledNote(
-		stepNoteP[patternNum][seqPos[patternNum]].note,
-		(stepNoteP[patternNum][seqPos[patternNum]].vel * patternSettings[patternNum].vel) / 127,
+		baseNote,
+		noteVel,
 		PatternChannel(patternNum),
 		noteon_micros,
-		(stepNoteP[patternNum][seqPos[patternNum]].len + 1) * step_micros,
+		noteLength_micros,
 		sendnoteCV
 	);
+
+	if(stepNoteP[patternNum][seqPos[patternNum]].chord != 0) {
+		for(int j = 0; j < 3; j++) {
+			int chordNote = chordPatterns[stepNoteP[patternNum][seqPos[patternNum]].chord][j];
+			if(chordNote == -1) {
+				break;
+			}
+			seqPlayScheduledNote(
+				baseNote + chordNote,
+				noteVel,
+				PatternChannel(patternNum),
+				noteon_micros,
+				noteLength_micros,
+				sendnoteCV
+			);
+		}
+	} 
 
 	// {notenum, vel, notelen, step_type, {p1,p2,p3,p4}, prob}
 	// send param locks
@@ -3698,8 +3863,6 @@ void clearPattern(int patternNum){
 		stepNoteP[patternNum][i].prob = 100;
 		stepNoteP[patternNum][i].condition = 0;
 	}
-	// also revert settings
-	patternSettings[patternNum] = { 15, (uint8_t)patternNum, 0, 0, 0, 0, 1, 2, 1, 0, 100, 127, false, false, false, false };
 }
 
 void copyStep(int patternNum, int step){
@@ -3841,6 +4004,24 @@ void initPatterns( void ) {
 		}
 
 		clearPattern(i);
+
+		patternSettings[i].len = 15;
+		patternSettings[i].channel = i;
+		patternSettings[i].startstep = 0;
+		patternSettings[i].autoresetstep = 0;
+		patternSettings[i].autoresetfreq = 0;
+		patternSettings[i].autoresetprob = 0;
+		patternSettings[i].current_cycle = 1;
+		patternSettings[i].rndstep = 3;
+		patternSettings[i].clockDivMultP = 2;
+		patternSettings[i].swing = 0;
+		patternSettings[i].reverse = false;
+		patternSettings[i].mute = false;
+		patternSettings[i].autoreset = false;
+		patternSettings[i].solo = false;
+		patternSettings[i].prob = 100;
+		patternSettings[i].vel = 127;
+		patternSettings[i].gate = 127;
 	}
 }
 
