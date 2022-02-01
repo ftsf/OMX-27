@@ -940,7 +940,21 @@ const ui_param seq_pattern_params[] = {
 			return (int)patternSettings[viewingPattern].gate;
 		}
 	},
-	param_DUMMY,
+	{
+		"CHDARP",
+		NULL,
+		false,
+		0,
+		15,
+		uiDrawValueInt,
+		[](int* valPtr, int newVal, int amt)->void {
+			patternSettings[viewingPattern].chordArp = newVal;
+		},
+		NULL,
+		[]()->int {
+			return (int)patternSettings[viewingPattern].chordArp;
+		}
+	},
 	param_DUMMY,
 
 	{
@@ -1569,13 +1583,9 @@ void drawPatternSteps(int pattern) {
 	
 	// WHAT TO DO HERE FOR MULTIPLE PAGES
 	// NUM_STEPKEYS or NUM_STEPS INSTEAD?
-	for(int i = pagestepstart; i < (pagestepstart + NUM_STEPKEYS); i++){
-		if (i < PatternLength(pattern)){
-			
-			// ONLY DO LEDS FOR THE CURRENT PAGE
-			
-			auto pixelpos = i - pagestepstart + 11;
-
+	for(int i = pagestepstart; i < pagestepstart + NUM_STEPKEYS; i++){
+		auto pixelpos = i - pagestepstart + 11;
+		if(i < PatternLength(pattern)) {
 			// default to blank or marker on every 4th
 			stepColor = i % 4 == 0 ? SEQMARKER : LEDOFF;
 
@@ -1618,6 +1628,8 @@ void drawPatternSteps(int pattern) {
 				stepColor = SEQCHASE; // step chase
 			}
 			strip.setPixelColor(pixelpos, stepColor);
+		} else {
+			strip.setPixelColor(pixelpos, LEDOFF);
 		}
 	}
 }
@@ -2138,6 +2150,11 @@ bool handleKeyEventMidi(keypadEvent e, int pattern) {
 	if(AUX_HELD) {
 		if(down && thisKey == 3) {
 			arp = !arp;
+			if(arp) {
+				displayMessage("ARP ON");
+			} else {
+				displayMessage("ARP OFF");
+			}
 			if(arp == false && omxMode == MODE_MIDI) {
 				allNotesOff();
 			}
@@ -2145,12 +2162,20 @@ bool handleKeyEventMidi(keypadEvent e, int pattern) {
 			return true;
 		} else if (down && thisKey == 4) {
 			arpLatch = !arpLatch;
+			if(arpLatch) {
+				displayMessage("LATCH ON");
+			} else {
+				displayMessage("LATCH OFF");
+			}
 			if(arpLatch == false) {
 				arpReset();
 			}
 			return true;
 		} else if(down && thisKey == 26) {
 			// disable scales
+			if(scalePattern != -1) {
+				displayMessage("SCALES OFF");
+			}
 			scalePattern = -1; // disable scales
 			setScale(0, -1);
 			for(int n = 1; n < 27; n++) {
@@ -3185,42 +3210,72 @@ void arpReset() {
 	arpLastChannel = -1;
 }
 
+int cmpUp(int a, int b) {
+	// return > 0 if a should be after b
+	if(a == b) {
+		return 0;
+	}
+	if(a == -1 && b != -1) {
+		// -1 should always go last
+		return 1;
+	}
+	return a - b;
+}
+
+int cmpDown(int a, int b) {
+	// return > 0 if b should be after a
+	if(a == b) {
+		return 0;
+	}
+	if(a == -1 && b != -1) {
+		// -1 should always go last
+		return 1;
+	}
+	return b - a;
+}
+
 void bSort(int array [], int from, int upTo) {
-	byte swaps;
+	int swaps;
 	do {
 		swaps=0;
-		for(byte i = from; i < upTo; i++) {
-			if(array[i] > array[i+1] || array[i] < 0) {
-				byte x = array[i+1];
+		for(int i = from; i < upTo; i++) {
+			if(cmpUp(array[i], array[i+1]) > 0) {
+				int x = array[i+1];
 				array[i+1] = array[i];
 				array[i] = x;
-				++swaps;
+				swaps++;
 			}
 		}
-	} while(swaps);
+	} while(swaps != 0);
 }
 
 void bSortRev(int array [], int from, int upTo) {
-	byte swaps;
+	int swaps;
 	do {
 		swaps=0;
-		for(byte i = from; i < upTo; i++) {
-			if(array[i] < array[i+1] || array[i] < 0) {
-				byte x = array[i+1];
+		for(int i = from; i < upTo; i++) {
+			if(cmpDown(array[i], array[i+1]) > 0) {
+				int x = array[i+1];
 				array[i+1] = array[i];
 				array[i] = x;
-				++swaps;
+				swaps++;
 			}
 		}
-	} while(swaps);
+	} while(swaps != 0);
 }
 
 
 void arpSort() {
 	if(arpSeqSort == 0) {
 		return;
-	} else if(arpSeqSort == 1) {
+	} else if(arpSeqSort == 1 || arpSeqSort == 3) {
 		// up
+		Serial.println("before sorting up");
+		for(int i = 0; i < ARP_SEQ_LEN; i++) {
+			Serial.print(i);
+			Serial.print(": ");
+			Serial.println(arpSeq[i]);
+		}
 		int count = 0;
 		for(int i = 0; i < ARP_SEQ_LEN; i++) {
 			if(arpSeq[i] != -1) {
@@ -3230,9 +3285,21 @@ void arpSort() {
 		for(int i = count; i < ARP_SEQ_LEN; i++) {
 			arpSeqSorted[i] = -1;
 		}
-		bSort(arpSeqSorted, 0, count);
-	} else if(arpSeqSort == 2) {
+		bSort(arpSeqSorted, 0, count-1);
+		Serial.println("after sorting up");
+		for(int i = 0; i < ARP_SEQ_LEN; i++) {
+			Serial.print(i);
+			Serial.print(": ");
+			Serial.println(arpSeqSorted[i]);
+		}
+	} else if(arpSeqSort == 2 || arpSeqSort == 4) {
 		// dn
+		Serial.println("before sorting down");
+		for(int i = 0; i < ARP_SEQ_LEN; i++) {
+			Serial.print(i);
+			Serial.print(": ");
+			Serial.println(arpSeq[i]);
+		}
 		int count = 0;
 		for(int i = 0; i < ARP_SEQ_LEN; i++) {
 			if(arpSeq[i] != -1) {
@@ -3242,7 +3309,13 @@ void arpSort() {
 		for(int i = count; i < ARP_SEQ_LEN; i++) {
 			arpSeqSorted[i] = -1;
 		}
-		bSortRev(arpSeqSorted, 0, count);
+		bSortRev(arpSeqSorted, 0, count-1);
+		Serial.println("after sorting down");
+		for(int i = 0; i < ARP_SEQ_LEN; i++) {
+			Serial.print(i);
+			Serial.print(": ");
+			Serial.println(arpSeqSorted[i]);
+		}
 	}
 }
 
@@ -3693,7 +3766,7 @@ void seqPlayPatternStep(int patternNum) {
 				baseNote + chordNote,
 				noteVel,
 				PatternChannel(patternNum),
-				noteon_micros,
+				noteon_micros + (((patternSettings[patternNum].chordArp * step_micros) / 15) * (j+1)),
 				noteLength_micros,
 				sendnoteCV
 			);

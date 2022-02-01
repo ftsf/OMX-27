@@ -61,6 +61,7 @@ struct PatternSettings {  // ?? bytes
   uint8_t prob : 7; // probability any step playing
   uint8_t vel : 7; // velocity multiplier
   uint8_t gate : 7; // gate amount
+  uint8_t chordArp : 4; // amount to arp chords
   bool reverse : 1;
   bool mute : 1;
   bool autoreset : 1; // whether autoreset is enabled
