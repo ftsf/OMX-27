@@ -319,7 +319,7 @@ const int chordPatterns[][3] = {
 	{ 4, 11, 14 },  // 12: MAJ9
 	{ 3, 10, 14 },  // 13: MIN9
 	{ 4, 10, 14 },  // 14: 9
-	{ 3, 6, 9 },    // 15: FDIM
+	{ 5, 7, 11 },    // 15: 7SUS4
 };
 
 void uiDrawValueChord(int value, int x) {
@@ -352,7 +352,7 @@ void uiDrawValueChord(int value, int x) {
 	} else if(value == 14) {
 		u8g2centerText("9", x*32, hline*2+3, 32, uiDrawTextY);
 	} else if(value == 15) {
-		u8g2centerText("FDIM", x*32, hline*2+3, 32, uiDrawTextY);
+		u8g2centerText("7SUS4", x*32, hline*2+3, 32, uiDrawTextY);
 	} else {
 		u8g2centerText("---", x*32, hline*2+3, 32, uiDrawTextY);
 	}
@@ -1086,7 +1086,21 @@ const ui_param param_SeqCHORD = {
 	}
 };
 
-
+const ui_param param_SeqCHORDARP = {
+	"CHARP",
+	NULL,
+	false,
+	0,
+	15,
+	uiDrawValueInt,
+	[](int* valPtr, int newVal, int amt)->void {
+		stepNoteP[viewingPattern][selectedStep].chordArp = newVal;
+	},
+	NULL,
+	[]()->int {
+		return (int)stepNoteP[viewingPattern][selectedStep].chordArp;
+	}
+};
 
 const ui_param param_SeqSTEP = {
 	"STEP",
@@ -1160,6 +1174,7 @@ const ui_param seq_note_select_params[] = {
 		}
 	},
 	param_SeqCHORD,
+	param_SeqCHORDARP,
 	///
 	{
 		"L-1",
@@ -1259,11 +1274,8 @@ void advanceSteps(Micros advance) {
 		advance -= timeToNextStep;
 		timeToNextStep = ppqInterval;
 
-		// turn off any expiring notes
-		pendingNoteOffs.play(micros());
-
-		// turn on any pending notes
-		pendingNoteOns.play(micros());
+		// turn on/off any pending notes
+		pendingMidi.play(micros());
 	}
 	timeToNextStep -= advance;
 }
@@ -2079,8 +2091,12 @@ bool handleKeyEventCommon(keypadEvent e) {
 			seqStop();
 			allNotesOffPanic();
 			playing = false;
-			displayMessage("PANIC!");
 			invalidateShortPress[0] = true;
+			DANGER_CONFIRM(0, "CLEAR ALL DATA?", {
+				initPatterns();
+				displayMessagef("DATA CLEARED");
+				dangerConfirm = false;
+			});
 			return true;
 		}
 		// new press on AUX
@@ -3150,36 +3166,6 @@ bool evaluate_AB(int condition, int patternNum) {
 	return shouldTrigger;
 }
 
-void changeStepType(int amount){
-	auto tempType = stepNoteP[viewingPattern][selectedStep].stepType + amount;
-
-	// this is fucking hacky to increment the enum for stepType
-	switch(tempType){
-		case 0:
-			stepNoteP[viewingPattern][selectedStep].stepType = STEPTYPE_NONE;
-			break;
-		case 1:
-			stepNoteP[viewingPattern][selectedStep].stepType = STEPTYPE_RESTART;
-			break;
-		case 2:
-			stepNoteP[viewingPattern][selectedStep].stepType = STEPTYPE_FWD;
-			break;
-		case 3:
-			stepNoteP[viewingPattern][selectedStep].stepType = STEPTYPE_REV;
-			break;
-		case 4:
-			stepNoteP[viewingPattern][selectedStep].stepType = STEPTYPE_PONG;
-			break;
-		case 5:
-			stepNoteP[viewingPattern][selectedStep].stepType = STEPTYPE_RANDSTEP;
-			break;
-		case 6:
-			stepNoteP[viewingPattern][selectedStep].stepType = STEPTYPE_RAND;
-			break;
-		default:
-			break;
-	}
-}
 void step_on(int patternNum){
 //	Serial.print(patternNum);
 //	Serial.println(" step on");
@@ -3654,8 +3640,8 @@ void rawNoteOff(int notenum, int channel) {
 }
 
 void seqPlayScheduledNote(int note, int vel, int channel, int noteon_micros, int length_micros, bool sendnoteCV) {
-	pendingNoteOns.insert(note, vel, channel, noteon_micros, sendnoteCV);
-	pendingNoteOffs.insert(note, channel, noteon_micros + length_micros, sendnoteCV);
+	pendingMidi.insert(note, vel, true,  channel, noteon_micros, sendnoteCV);
+	pendingMidi.insert(note, 0,   false, channel, noteon_micros + MAX(length_micros, 1), sendnoteCV);
 }
 
 // Play a note / step (SEQUENCERS)
@@ -3743,7 +3729,9 @@ void seqPlayPatternStep(int patternNum) {
 		noteon_micros = micros();
 	}
 
-	Micros noteLength_micros = (stepNoteP[patternNum][seqPos[patternNum]].len + 1) * ((step_micros * patternSettings[patternNum].gate) / 127);
+    Micros fullStep_micros = step_micros * multValues[patternSettings[patternNum].clockDivMultP];
+
+	Micros noteLength_micros = (stepNoteP[patternNum][seqPos[patternNum]].len + 1) * ((fullStep_micros * patternSettings[patternNum].gate) / 127);
 	int baseNote = stepNoteP[patternNum][seqPos[patternNum]].note;
 	int noteVel = (stepNoteP[patternNum][seqPos[patternNum]].vel * patternSettings[patternNum].vel) / 127;
 
@@ -3766,7 +3754,7 @@ void seqPlayPatternStep(int patternNum) {
 				baseNote + chordNote,
 				noteVel,
 				PatternChannel(patternNum),
-				noteon_micros + (((patternSettings[patternNum].chordArp * step_micros) / 15) * (j+1)),
+				noteon_micros + ((((patternSettings[patternNum].chordArp * stepNoteP[patternNum][seqPos[patternNum]].chordArp) / 15 * fullStep_micros) / 15) * (j+1)),
 				noteLength_micros,
 				sendnoteCV
 			);
@@ -3793,11 +3781,11 @@ void seqPlayPatternStep(int patternNum) {
 	patternActive[patternNum] = 1;
 	dirtyPixels = true;
 
-	// CV is sent from pendingNoteOns/pendingNoteOffs
+	// CV is sent from pendingMidi
 }
 
 void allNotesOff() {
-	pendingNoteOffs.allOff();
+	pendingMidi.allOff();
 }
 
 void allNotesOffPanic() {

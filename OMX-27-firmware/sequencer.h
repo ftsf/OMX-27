@@ -125,6 +125,7 @@ struct StepNote {           // ?? bytes
   uint8_t condition : 6;			// 0 - 36
   StepType stepType : 3;	// can be 2 bits as long as StepType has 4 values or fewer
   uint8_t chord : 4;        // 0 - 15
+  uint8_t chordArp : 4;        // 0 - 15
 }; // {note, vel, len, TRIG_TYPE, {params0, params1, params2, params3}, prob, cond, STEP_TYPE}
 
 // default to GM Drum Map for now
