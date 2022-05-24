@@ -3888,41 +3888,21 @@ void clearStep(int patternNum, int step){
 	stepNoteP[patternNum][step].params[4] = -1;
 	stepNoteP[patternNum][step].prob = 100;
 	stepNoteP[patternNum][step].condition = 0;
+	stepNoteP[patternNum][step].chord = 0;
+	stepNoteP[patternNum][step].chordArp = 0;
 }
 
 void clearPage(int patternNum, int page){
 	// {notenum,vel,len,stepType,{p1,p2,p3,p4,p5}}
 	for (int step = page * NUM_STEPKEYS; step < page * NUM_STEPKEYS + NUM_STEPKEYS; step++){
-		stepNoteP[patternNum][step].note = patternDefaultNoteMap[patternNum];
-		stepNoteP[patternNum][step].vel = defaultVelocity;
-		stepNoteP[patternNum][step].len = 0;
-		stepNoteP[patternNum][step].stepType = STEPTYPE_NONE;
-		stepNoteP[patternNum][step].trig = TRIGTYPE_MUTE;
-		stepNoteP[patternNum][step].params[0] = -1;
-		stepNoteP[patternNum][step].params[1] = -1;
-		stepNoteP[patternNum][step].params[2] = -1;
-		stepNoteP[patternNum][step].params[3] = -1;
-		stepNoteP[patternNum][step].params[4] = -1;
-		stepNoteP[patternNum][step].prob = 100;
-		stepNoteP[patternNum][step].condition = 0;
+		clearStep(patternNum, step);
 	}
 }
 
 void clearPattern(int patternNum){
 	for (int i = 0; i < NUM_STEPS; i++){
 		// {notenum,vel,len,stepType,{p1,p2,p3,p4,p5}}
-		stepNoteP[patternNum][i].note = patternDefaultNoteMap[patternNum];
-		stepNoteP[patternNum][i].vel = defaultVelocity;
-		stepNoteP[patternNum][i].len = 0;
-		stepNoteP[patternNum][i].stepType = STEPTYPE_NONE;
-		stepNoteP[patternNum][i].trig = TRIGTYPE_MUTE;
-		stepNoteP[patternNum][i].params[0] = -1;
-		stepNoteP[patternNum][i].params[1] = -1;
-		stepNoteP[patternNum][i].params[2] = -1;
-		stepNoteP[patternNum][i].params[3] = -1;
-		stepNoteP[patternNum][i].params[4] = -1;
-		stepNoteP[patternNum][i].prob = 100;
-		stepNoteP[patternNum][i].condition = 0;
+		clearStep(patternNum, step);
 	}
 }
 
