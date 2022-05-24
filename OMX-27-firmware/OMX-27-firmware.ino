@@ -3902,7 +3902,7 @@ void clearPage(int patternNum, int page){
 void clearPattern(int patternNum){
 	for (int i = 0; i < NUM_STEPS; i++){
 		// {notenum,vel,len,stepType,{p1,p2,p3,p4,p5}}
-		clearStep(patternNum, step);
+		clearStep(patternNum, i);
 	}
 }
 
