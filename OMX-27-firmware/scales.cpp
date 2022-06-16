@@ -2,6 +2,7 @@
 #include "scales.h"
 #include "colors.h"
 #include "util.h"
+#include "config.h"
 
 int scaleOffsets[12];
 int scaleDegrees[12];
@@ -132,24 +133,24 @@ const char* scaleNames[] = {
 };
 
 const char* noteNames[] = {
-	"C",
+	"C ",
 	"C#",
-	"D",
+	"D ",
 	"D#",
-	"E",
-	"F",
+	"E ",
+	"F ",
 	"F#",
-	"G",
+	"G ",
 	"G#",
-	"A",
+	"A ",
 	"A#",
-	"B",
+	"B ",
 };
 
 
 
 void setScale(int scaleRoot, int scalePattern) {
-	if(scaleRoot == -1) {
+	if(scalePattern == -1) {
 		// disabled
 		for(int n = 0; n < 12; n++) {
 			scaleOffsets[n] = -1;
@@ -176,7 +177,7 @@ void setScale(int scaleRoot, int scalePattern) {
 			if(degree == -1) {
 				scaleColors[n] = LEDOFF;
 			} else {
-				scaleColors[n] = strip.gamma32(strip.ColorHSV((65535 / 12) * offset, 127, 200));
+				scaleColors[n] = strip.gamma32(strip.ColorHSV((65535 / 12) * offset, rainbowSaturation, scaleBrightness));
 			}
 		}
 	}

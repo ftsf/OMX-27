@@ -25,6 +25,12 @@ namespace MM {
 		HWMIDI.sendNoteOff(note, velocity, channel);
 
 	}
+
+	void sendPitchBend(int bend, int channel) {
+		usbMIDI.sendPitchBend(bend, channel);
+		HWMIDI.sendPitchBend(bend, channel);
+	}
+
 	void sendControlChange(int control, int value, int channel) {
 		usbMIDI.sendControlChange(control, value, channel);
 		HWMIDI.sendControlChange(control, value, channel);

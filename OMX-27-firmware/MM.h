@@ -6,6 +6,7 @@ namespace MM {
 	void sendNoteOff(int note, int velocity, int channel);
 	void sendControlChange(int control, int value, int channel);
 	void sendProgramChange(int program, int channel);
+	void sendPitchBend(int bend, int channel);
 
 
 	void sendClock();

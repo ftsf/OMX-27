@@ -4,6 +4,9 @@
 const OMXMode DEFAULT_MODE = MODE_MIDI;
 const uint8_t EEPROM_VERSION = 8;
 
+uint8_t rainbowSaturation = 127;
+uint8_t scaleBrightness = 200;
+
 // DEFINE CC NUMBERS FOR POTS // CCS mapped to Organelle Defaults
 const int CC1 = 21;
 const int CC2 = 22;
@@ -42,7 +45,7 @@ const int gridh = 32;
 const int gridw = 128;
 const int PPQ = 96;
 
-const char* modes[] = {"MI","S1","S2","OM"};
+const char* modes[] = {"MI","S1","S2","OM","CONFIG"};
 const char* infoDialogText[] = {"COPIED","PASTED","CLEARED","RESET","FWD >>","<< REV","SAVED","SAVE?"};
 
 float multValues[] = {.25, .5, 1, 2, 4, 8, 16};

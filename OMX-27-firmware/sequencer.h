@@ -3,8 +3,6 @@
 #define NUM_STEPKEYS 16
 
 // the MIDI channel number to send messages
-int midiChannel = 1;
-
 int ticks = 0;            // A tick of the clock
 bool clockSource = 0;     // Internal clock (0), external clock (1)
 bool playing = 0;         // Are we playing?
@@ -12,6 +10,8 @@ bool paused = 0;          // Are we paused?
 bool stopped = 1;         // Are we stopped? (Must init to 1)
 byte songPosition = 0;    // A place to store the current MIDI song position
 int playingPattern = 0;  // The currently playing pattern, 0-7
+int nextPlayingPattern = -1;
+int viewingPattern = 0;
 bool seqResetFlag = 1;    // for autoreset functionality
 using Micros = unsigned long; // for tracking time per pattern
 int clockDivMult = 0;  // TODO: per pattern setting
@@ -58,6 +58,10 @@ struct PatternSettings {  // ?? bytes
   uint8_t clockDivMultP : 4;
   uint8_t autoresetprob : 7; // probability of autoreset - 1 is always and totally random if autoreset is 0
   uint8_t swing : 7;
+  uint8_t prob : 7; // probability any step playing
+  uint8_t vel : 7; // velocity multiplier
+  uint8_t gate : 7; // gate amount
+  uint8_t chordArp : 4; // amount to arp chords
   bool reverse : 1;
   bool mute : 1;
   bool autoreset : 1; // whether autoreset is enabled
@@ -65,14 +69,14 @@ struct PatternSettings {  // ?? bytes
 }; // ? bytes
 
 PatternSettings patternSettings[NUM_PATTERNS] = {
-  { 15, 0, 0, 0, 0, 0, 1, 3, 1, 0, false, false, false, false },
-  { 15, 1, 0, 0, 0, 0, 1, 3, 1, 0, false, false, false, false },
-  { 15, 2, 0, 0, 0, 0, 1, 3, 1, 0, false, false, false, false },
-  { 15, 3, 0, 0, 0, 0, 1, 3, 1, 0, false, false, false, false },
-  { 15, 4, 0, 0, 0, 0, 1, 3, 1, 0, false, false, false, false },
-  { 15, 5, 0, 0, 0, 0, 1, 3, 1, 0, false, false, false, false },
-  { 15, 6, 0, 0, 0, 0, 1, 3, 1, 0, false, false, false, false },
-  { 15, 7, 0, 0, 0, 0, 1, 3, 1, 0, false, false, false, false }
+  { 15, 0, 0, 0, 0, 0, 1, 2, 1, 0, 100, 127, false, false, false, false },
+  { 15, 1, 0, 0, 0, 0, 1, 2, 1, 0, 100, 127, false, false, false, false },
+  { 15, 2, 0, 0, 0, 0, 1, 2, 1, 0, 100, 127, false, false, false, false },
+  { 15, 3, 0, 0, 0, 0, 1, 2, 1, 0, 100, 127, false, false, false, false },
+  { 15, 4, 0, 0, 0, 0, 1, 2, 1, 0, 100, 127, false, false, false, false },
+  { 15, 5, 0, 0, 0, 0, 1, 2, 1, 0, 100, 127, false, false, false, false },
+  { 15, 6, 0, 0, 0, 0, 1, 2, 1, 0, 100, 127, false, false, false, false },
+  { 15, 7, 0, 0, 0, 0, 1, 2, 1, 0, 100, 127, false, false, false, false }
 };
 
 struct TimePerPattern {
@@ -98,6 +102,10 @@ uint8_t PatternLength( int pattern ) {
   return patternSettings[pattern].len + 1;
 }
 
+int PatternPages( int pattern ) {
+  return (PatternLength(pattern) + NUM_STEPKEYS - 1) / NUM_STEPKEYS;
+}
+
 void SetPatternLength( int pattern, int len ) {
   patternSettings[pattern].len = len - 1;
 }
@@ -116,6 +124,8 @@ struct StepNote {           // ?? bytes
   uint8_t prob : 7;			// 0 - 100
   uint8_t condition : 6;			// 0 - 36
   StepType stepType : 3;	// can be 2 bits as long as StepType has 4 values or fewer
+  uint8_t chord : 4;        // 0 - 15
+  uint8_t chordArp : 4;        // 0 - 15
 }; // {note, vel, len, TRIG_TYPE, {params0, params1, params2, params3}, prob, cond, STEP_TYPE}
 
 // default to GM Drum Map for now
@@ -125,9 +135,32 @@ uint8_t lastNote[NUM_PATTERNS][NUM_STEPS] = {
 	{0},{0},{0},{0},{0},{0},{0},{0}
 };
 
-uint8_t midiLastNote = 0;
+uint8_t patternActive[NUM_PATTERNS] = {
+	0,0,0,0,0,0,0,0
+};
+
+StepNote copyStepBuffer = {0, 0, 0, TRIGTYPE_MUTE, { -1, -1, -1, -1, -1}, 100, 0, STEPTYPE_NONE };
 
 StepNote copyPatternBuffer[NUM_STEPS] = {
+  {0, 0, 0, TRIGTYPE_MUTE, { -1, -1, -1, -1, -1}, 100, 0, STEPTYPE_NONE },
+  {0, 0, 0, TRIGTYPE_MUTE, { -1, -1, -1, -1, -1}, 100, 0, STEPTYPE_NONE },
+  {0, 0, 0, TRIGTYPE_MUTE, { -1, -1, -1, -1, -1}, 100, 0, STEPTYPE_NONE },
+  {0, 0, 0, TRIGTYPE_MUTE, { -1, -1, -1, -1, -1}, 100, 0, STEPTYPE_NONE },
+  {0, 0, 0, TRIGTYPE_MUTE, { -1, -1, -1, -1, -1}, 100, 0, STEPTYPE_NONE },
+  {0, 0, 0, TRIGTYPE_MUTE, { -1, -1, -1, -1, -1}, 100, 0, STEPTYPE_NONE },
+  {0, 0, 0, TRIGTYPE_MUTE, { -1, -1, -1, -1, -1}, 100, 0, STEPTYPE_NONE },
+  {0, 0, 0, TRIGTYPE_MUTE, { -1, -1, -1, -1, -1}, 100, 0, STEPTYPE_NONE },
+  {0, 0, 0, TRIGTYPE_MUTE, { -1, -1, -1, -1, -1}, 100, 0, STEPTYPE_NONE },
+  {0, 0, 0, TRIGTYPE_MUTE, { -1, -1, -1, -1, -1}, 100, 0, STEPTYPE_NONE },
+  {0, 0, 0, TRIGTYPE_MUTE, { -1, -1, -1, -1, -1}, 100, 0, STEPTYPE_NONE },
+  {0, 0, 0, TRIGTYPE_MUTE, { -1, -1, -1, -1, -1}, 100, 0, STEPTYPE_NONE },
+  {0, 0, 0, TRIGTYPE_MUTE, { -1, -1, -1, -1, -1}, 100, 0, STEPTYPE_NONE },
+  {0, 0, 0, TRIGTYPE_MUTE, { -1, -1, -1, -1, -1}, 100, 0, STEPTYPE_NONE },
+  {0, 0, 0, TRIGTYPE_MUTE, { -1, -1, -1, -1, -1}, 100, 0, STEPTYPE_NONE },
+  {0, 0, 0, TRIGTYPE_MUTE, { -1, -1, -1, -1, -1}, 100, 0, STEPTYPE_NONE }
+};
+
+StepNote copyPageBuffer[NUM_STEPKEYS] = {
   {0, 0, 0, TRIGTYPE_MUTE, { -1, -1, -1, -1, -1}, 100, 0, STEPTYPE_NONE },
   {0, 0, 0, TRIGTYPE_MUTE, { -1, -1, -1, -1, -1}, 100, 0, STEPTYPE_NONE },
   {0, 0, 0, TRIGTYPE_MUTE, { -1, -1, -1, -1, -1}, 100, 0, STEPTYPE_NONE },
@@ -169,3 +202,7 @@ int trigConditionsAB[36][2] ={
     {1,7}, {2,7}, {3,7}, {4,7}, {5,7}, {6,7}, {7,7},
     {1,8}, {2,8}, {3,8}, {4,8}, {5,8}, {6,8}, {7,8}, {8,8}
 };
+
+bool disablePLock[NUM_PATTERNS] = {0, 0, 0, 0, 0, 0, 0, 0};
+bool disableFX[NUM_PATTERNS] = {0, 0, 0, 0, 0, 0, 0, 0};
+bool pageLock[NUM_PATTERNS] = {0, 0, 0, 0, 0, 0, 0, 0};
